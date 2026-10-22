@@ -158,7 +158,10 @@ def t_trace_basic() -> None:
     t = next(x for x in rep.traces if x.src == "PC0" and x.dst == "PC1")
     check("预期可通", t.ok, t.note)
     check("3 跳", len(t.hops) == 3, str(t.hops))
-    check("首跳是网关", t.hops[0] == "192.168.16.62", str(t.hops))
+    # 网关值从 DSL 里读，别写死——uc01 的行政部网段从 /26 改成 /25 时，
+    # 写死的 192.168.16.62 让这条测试假失败过一次
+    gw = next(d["gateway"] for d in data["devices"] if d.get("name") == "PC0")
+    check("首跳是网关", t.hops[0] == gw, f"{t.hops} 期望首跳 {gw}")
     check("末跳是目的主机", t.hops[-1] == "192.168.16.138", str(t.hops))
     check("路径是 PC0→R1→R3→PC1", t.routers == ["R1", "R3"], str(t.routers))
 

@@ -101,15 +101,15 @@ no ip cef
 no ipv6 cef
 !
 interface FastEthernet2/0
- ip address 192.168.16.62 255.255.255.192
+ ip address 192.168.16.126 255.255.255.128
  no shutdown
 !
 interface Serial0/0
- ip address 10.0.0.29 255.255.255.252
+ ip address 10.0.0.1 255.255.255.252
  no shutdown
 !
 interface Serial1/0
- ip address 10.0.0.37 255.255.255.252
+ ip address 10.0.0.29 255.255.255.252
  no shutdown
 !
 interface FastEthernet3/0
@@ -146,12 +146,12 @@ no ip cef
 no ipv6 cef
 !
 interface Serial1/0
- ip address 10.0.0.30 255.255.255.252
+ ip address 10.0.0.2 255.255.255.252
  clock rate 2000000
  no shutdown
 !
 interface Serial0/0
- ip address 10.0.0.33 255.255.255.252
+ ip address 10.0.0.21 255.255.255.252
  no shutdown
 !
 interface FastEthernet2/0
@@ -195,12 +195,12 @@ interface FastEthernet2/0
  no shutdown
 !
 interface Serial1/0
- ip address 10.0.0.34 255.255.255.252
+ ip address 10.0.0.22 255.255.255.252
  clock rate 2000000
  no shutdown
 !
 interface Serial0/0
- ip address 10.0.0.38 255.255.255.252
+ ip address 10.0.0.30 255.255.255.252
  clock rate 2000000
  no shutdown
 !
@@ -270,8 +270,8 @@ end
 
 ## PC0（主机）
 
-- IP：192.168.16.10/26
-- 网关：192.168.16.62
+- IP：192.168.16.10/25
+- 网关：192.168.16.126
 
 ## PC1（主机）
 
