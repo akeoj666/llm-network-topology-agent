@@ -1,0 +1,96 @@
+meta:
+  id: UC-93
+  title: 双路由 OSPF 单区域
+  source_prompt: 两台路由器用串口线互连，各带一个 192.168.77.0/24 和 192.168.88.0/24 网段，各挂一台交换机和一台
+    PC，跑 OSPF 单区域
+devices:
+- name: R1
+  role: router
+  model: Router-PT-Empty
+  interfaces:
+  - name: FastEthernet2/0
+    ip: 192.168.77.1/24
+  - name: Serial0/0
+    ip: 10.0.0.1/30
+  - name: Serial1/0
+    shutdown: true
+  - name: FastEthernet3/0
+    shutdown: true
+- name: R2
+  role: router
+  model: Router-PT-Empty
+  interfaces:
+  - name: FastEthernet2/0
+    ip: 192.168.88.1/24
+  - name: Serial1/0
+    ip: 10.0.0.2/30
+  - name: Serial0/0
+    shutdown: true
+  - name: FastEthernet3/0
+    shutdown: true
+- name: SW1
+  role: switch
+  model: 2960-24TT
+  interfaces:
+  - name: FastEthernet0/1
+  - name: FastEthernet0/24
+- name: SW2
+  role: switch
+  model: 2960-24TT
+  interfaces:
+  - name: FastEthernet0/1
+  - name: FastEthernet0/24
+- name: PC1
+  role: pc
+  model: PC-PT
+  ip: 192.168.77.10/24
+  gateway: 192.168.77.1
+- name: PC2
+  role: pc
+  model: PC-PT
+  ip: 192.168.88.10/24
+  gateway: 192.168.88.1
+links:
+- from: R1:Serial0/0
+  to: R2:Serial1/0
+  cable: serial
+  subnet: 10.0.0.0/30
+- from: PC1:FastEthernet0
+  to: SW1:FastEthernet0/1
+  cable: copper
+- from: SW1:FastEthernet0/24
+  to: R1:FastEthernet2/0
+  cable: copper
+- from: PC2:FastEthernet0
+  to: SW2:FastEthernet0/1
+  cable: copper
+- from: SW2:FastEthernet0/24
+  to: R2:FastEthernet2/0
+  cable: copper
+subnets:
+- cidr: 10.0.0.0/30
+  name: R1-R2
+  hosts: 2
+- cidr: 192.168.77.0/24
+  name: net77
+  gateway: 192.168.77.1
+  hosts: 1
+- cidr: 192.168.88.0/24
+  name: net88
+  gateway: 192.168.88.1
+  hosts: 1
+routing:
+- device: R1
+  protocol: ospf
+  process: 1
+  area: 0
+- device: R2
+  protocol: ospf
+  process: 1
+  area: 0
+
+# 验收断言：这些主机对应该通 / 不通（tools/accept.py 据此判定通过）
+expect:
+  reach:
+    - [PC1, PC2]
+    - [PC2, PC1]

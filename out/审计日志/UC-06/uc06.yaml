@@ -1,0 +1,34 @@
+# UC-06 家庭工作室（按评分标准附录 UC-06 逐字对齐）
+# 两台 PC 经一台交换机互联，192.168.1.0/24，无路由器。
+# 这个用例的价值是「负向能力证明」：没有三层设备时，系统不会硬塞一台路由器进去，
+# 也不会因为找不到网关就判定不通 —— 同网段二层直通本来就不需要网关。
+meta:
+  id: UC-06
+  title: 家庭工作室（纯二层）
+  source_prompt: 家里两台电脑想连起来互传文件，就一台交换机，192.168.1.0/24，不用路由器，要求两台能互通。
+
+subnets:
+  - { cidr: 192.168.1.0/24, name: home, hosts: 2 }
+
+devices:
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      # 不写 vlan 就是默认 access VLAN 1，不用声明
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/2 }
+      - { name: FastEthernet0/24, shutdown: true }
+
+  # 同网段不需要网关，这里刻意不写 gateway
+  - { name: PC0, role: pc, model: PC-PT, ip: 192.168.1.10/24 }
+  - { name: PC1, role: pc, model: PC-PT, ip: 192.168.1.11/24 }
+
+links:
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW0:FastEthernet0/2", cable: copper }
+
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC0]

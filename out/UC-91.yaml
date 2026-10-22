@@ -1,0 +1,78 @@
+meta:
+  id: UC-91
+  title: 双路由 OSPF
+  source_prompt: 两台路由器一条串口线，各带一个 192.168.1.0/24 和 192.168.2.0/24 网段和一台 PC，跑 OSPF
+devices:
+- name: R1
+  role: router
+  model: Router-PT-Empty
+  interfaces:
+  - name: FastEthernet2/0
+    ip: 192.168.1.1/24
+  - name: Serial0/0
+    ip: 10.0.0.1/30
+  - name: Serial1/0
+    shutdown: true
+  - name: FastEthernet3/0
+    shutdown: true
+- name: R2
+  role: router
+  model: Router-PT-Empty
+  interfaces:
+  - name: FastEthernet2/0
+    ip: 192.168.2.1/24
+  - name: Serial1/0
+    ip: 10.0.0.2/30
+  - name: Serial0/0
+    shutdown: true
+  - name: FastEthernet3/0
+    shutdown: true
+- name: PC0
+  role: pc
+  model: PC-PT
+  ip: 192.168.1.10/24
+  gateway: 192.168.1.1
+- name: PC1
+  role: pc
+  model: PC-PT
+  ip: 192.168.2.10/24
+  gateway: 192.168.2.1
+links:
+- from: R1:Serial0/0
+  to: R2:Serial1/0
+  cable: serial
+  subnet: 10.0.0.0/30
+- from: PC0:FastEthernet0
+  to: R1:FastEthernet2/0
+  cable: copper
+  subnet: 192.168.1.0/24
+- from: PC1:FastEthernet0
+  to: R2:FastEthernet2/0
+  cable: copper
+  subnet: 192.168.2.0/24
+subnets:
+- cidr: 10.0.0.0/30
+  name: R1-R2
+- cidr: 192.168.1.0/24
+  name: admin
+  gateway: 192.168.1.1
+  hosts: 1
+- cidr: 192.168.2.0/24
+  name: rd
+  gateway: 192.168.2.1
+  hosts: 1
+routing:
+- device: R1
+  protocol: ospf
+  process: 1
+  area: 0
+- device: R2
+  protocol: ospf
+  process: 1
+  area: 0
+
+# 验收断言：这些主机对应该通 / 不通（tools/accept.py 据此判定通过）
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC0]

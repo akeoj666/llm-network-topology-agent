@@ -1,0 +1,105 @@
+# UC-07 咖啡馆网络（按评分标准附录 UC-07 逐字对齐）
+# 客人 VLAN 30（192.168.30.0/24）与收银 VLAN 40（192.168.40.0/24）二层隔离，
+# 经单臂路由器 R1 做三层互联；R1 外口接 ISP（R2）走默认路由上网。
+# 策略：
+#   客人 → 公网        ✅
+#   客人 → 收银        ❌（ACL 100 拦，挂在 Fa2/0.30 入方向）
+#   收银 → 任何地方    ✅（收银口不挂 ACL，符合「收银不受限」）
+#   公网 → 客人/收银   ✅（回程由 R2 的静态路由指回 R1）
+meta:
+  id: UC-07
+  title: 咖啡馆客人网络与收银网络隔离
+  source_prompt: 咖啡馆的客人 WiFi 和收银机要在二层隔离，客人网段 192.168.30.0/24，收银 192.168.40.0/24，都接在一台交换机上再单臂接到路由器，路由器外口接 ISP 能上网。要求客人能上网但不能访问收银网络，收银不受限制。
+
+subnets:
+  - { cidr: 192.168.30.0/24, name: guest, gateway: 192.168.30.254, hosts: 2, vlan: 30 }
+  - { cidr: 192.168.40.0/24, name: cashier, gateway: 192.168.40.254, hosts: 2, vlan: 40 }
+  - { cidr: 202.96.0.0/30, name: uplink, hosts: 0 }
+  - { cidr: 218.75.230.0/24, name: internet, gateway: 218.75.230.1, hosts: 0 }
+
+vlans:
+  - { id: 30, name: GUEST, cidr: 192.168.30.0/24 }
+  - { id: 40, name: CASHIER, cidr: 192.168.40.0/24 }
+
+devices:
+  # 边界路由器：单臂做 VLAN 间路由 + 一条默认路由指向 ISP
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0 }
+      - { name: FastEthernet2/0.30, ip: 192.168.30.254/24, dot1q: 30 }
+      - { name: FastEthernet2/0.40, ip: 192.168.40.254/24, dot1q: 40 }
+      - { name: FastEthernet3/0, ip: 202.96.0.1/30 }
+      - { name: Serial0/0, shutdown: true }
+      - { name: Serial1/0, shutdown: true }
+
+  # ISP 侧（用一台路由器模拟），挂公网服务器
+  - name: R2
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 202.96.0.2/30 }
+      - { name: FastEthernet3/0, ip: 218.75.230.1/24 }
+      - { name: Serial0/0, shutdown: true }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1, mode: access, vlan: 30 }
+      - { name: FastEthernet0/2, mode: access, vlan: 30 }
+      - { name: FastEthernet0/3, mode: access, vlan: 40 }
+      - { name: FastEthernet0/4, mode: access, vlan: 40 }
+      - { name: FastEthernet0/24, mode: trunk }
+
+  - { name: PC0, role: pc, model: PC-PT, ip: 192.168.30.11/24, gateway: 192.168.30.254 }
+  - { name: PC1, role: pc, model: PC-PT, ip: 192.168.30.12/24, gateway: 192.168.30.254 }
+  - { name: PC2, role: pc, model: PC-PT, ip: 192.168.40.11/24, gateway: 192.168.40.254 }
+  - { name: PC3, role: pc, model: PC-PT, ip: 192.168.40.12/24, gateway: 192.168.40.254 }
+  - { name: SRV0, role: server, model: PC-PT, ip: 218.75.230.10/24, gateway: 218.75.230.1 }
+
+links:
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW0:FastEthernet0/2", cable: copper }
+  - { from: "PC2:FastEthernet0", to: "SW0:FastEthernet0/3", cable: copper }
+  - { from: "PC3:FastEthernet0", to: "SW0:FastEthernet0/4", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R1:FastEthernet2/0", cable: copper }
+  - { from: "R1:FastEthernet3/0", to: "R2:FastEthernet2/0", cable: cross }
+  - { from: "R2:FastEthernet3/0", to: "SRV0:FastEthernet0", cable: cross, subnet: 218.75.230.0/24 }
+
+routing:
+  # R1：默认路由指向 ISP，两条回程明细由 ISP 侧静态指回
+  - { device: R1, protocol: static, default_route: 202.96.0.2 }
+  # R2：把这间咖啡馆的两个网段指回 R1（真实 ISP 会用 BGP/静态，这里用静态最直白）
+  - device: R2
+    protocol: static
+    routes:
+      - { network: 192.168.30.0, mask: 255.255.255.0, next_hop: 202.96.0.1 }
+      - { network: 192.168.40.0, mask: 255.255.255.0, next_hop: 202.96.0.1 }
+
+acls:
+  - id: 100
+    type: extended
+    rules:
+      # 只拦「客人 → 收银」，别的一律放行
+      - { action: deny, protocol: ip, source: 192.168.30.0/24, destination: 192.168.40.0/24 }
+      - { action: permit, protocol: ip, source: any, destination: any }
+    apply:
+      # 挂在客人子接口的入方向：包一进来就判，收银口不挂 ACL
+      - { device: R1, interface: FastEthernet2/0.30, direction: in }
+
+expect:
+  reach:
+    - [PC0, SRV0]       # 客人能上网
+    - [PC1, SRV0]
+    - [PC2, SRV0]       # 收银也能上网
+    - [SRV0, PC0]       # 回程也通
+    - [PC0, PC1]        # 同 VLAN 内部通
+    - [PC2, PC3]
+    - [PC2, PC0]        # 收银访问客人：不受限，应当通
+    - [PC3, PC1]
+  block:
+    - [PC0, PC2]        # 客人 → 收银：ACL 拦
+    - [PC1, PC3]

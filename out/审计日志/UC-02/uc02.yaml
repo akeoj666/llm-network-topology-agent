@@ -1,0 +1,108 @@
+# UC-02 OSPF 迁移
+# 业务扩张后 RIP 的 15 跳上限和 30 秒周期更新撑不住，全网换成 OSPF 单区域。
+# 三台路由器两两互联（三角形，具备冗余），每台各带一个办公网段。
+meta:
+  id: UC-02
+  title: OSPF 单区域迁移
+  source_prompt: 三台路由器三角形互联，每台下面各挂一个部门网段，原来跑 RIP，现在要换成 OSPF 单区域，要求任意两台 PC 都能通，并且断一条串口链路后还能自动绕路。
+
+subnets:
+  - { cidr: 10.0.0.0/30, name: R1-R2 }
+  - { cidr: 10.0.0.4/30, name: R2-R3 }
+  - { cidr: 10.0.0.8/30, name: R1-R3 }
+  - { cidr: 192.168.10.0/24, name: dept-a, gateway: 192.168.10.1, hosts: 1 }
+  - { cidr: 192.168.20.0/24, name: dept-b, gateway: 192.168.20.1, hosts: 1 }
+  - { cidr: 192.168.30.0/24, name: dept-c, gateway: 192.168.30.1, hosts: 1 }
+
+devices:
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.10.1/24 }
+      - { name: Serial0/0, ip: 10.0.0.1/30 }
+      - { name: Serial1/0, ip: 10.0.0.9/30 }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: R2
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.20.1/24 }
+      - { name: Serial1/0, ip: 10.0.0.2/30 }
+      - { name: Serial0/0, ip: 10.0.0.5/30 }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: R3
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.30.1/24 }
+      - { name: Serial1/0, ip: 10.0.0.6/30 }
+      - { name: Serial0/0, ip: 10.0.0.10/30 }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: SW1
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: SW2
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: PC0
+    role: pc
+    model: PC-PT
+    ip: 192.168.10.10/24
+    gateway: 192.168.10.1
+
+  - name: PC1
+    role: pc
+    model: PC-PT
+    ip: 192.168.20.10/24
+    gateway: 192.168.20.1
+
+  - name: PC2
+    role: pc
+    model: PC-PT
+    ip: 192.168.30.10/24
+    gateway: 192.168.30.1
+
+links:
+  - { from: "R1:Serial0/0", to: "R2:Serial1/0", cable: serial, subnet: 10.0.0.0/30 }
+  - { from: "R2:Serial0/0", to: "R3:Serial1/0", cable: serial, subnet: 10.0.0.4/30 }
+  - { from: "R1:Serial1/0", to: "R3:Serial0/0", cable: serial, subnet: 10.0.0.8/30 }
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R1:FastEthernet2/0", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW1:FastEthernet0/1", cable: copper }
+  - { from: "SW1:FastEthernet0/24", to: "R2:FastEthernet2/0", cable: copper }
+  - { from: "PC2:FastEthernet0", to: "SW2:FastEthernet0/1", cable: copper }
+  - { from: "SW2:FastEthernet0/24", to: "R3:FastEthernet2/0", cable: copper }
+
+routing:
+  - { device: R1, protocol: ospf, process: 100, area: 0 }
+  - { device: R2, protocol: ospf, process: 100, area: 0 }
+  - { device: R3, protocol: ospf, process: 100, area: 0 }
+
+# 验收断言：这些主机对应该通 / 不通（tools/accept.py 据此判定通过）
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC2]
+    - [PC0, PC2]
+    - [PC1, PC0]
+    - [PC2, PC0]
+    - [PC2, PC1]

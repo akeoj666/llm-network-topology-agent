@@ -1,0 +1,128 @@
+meta:
+  id: UC-95
+  title: 单臂路由 VLAN 互通
+  source_prompt: 一台路由器用一根网线接一台交换机，交换机上划 VLAN 10 给研发 192.168.10.0/24 和 VLAN 20 给财务
+    192.168.20.0/24，各挂三台 PC，用单臂路由让两个 VLAN 之间能互通
+subnets:
+- cidr: 192.168.10.0/24
+  name: rd
+  gateway: 192.168.10.1
+  hosts: 3
+  vlan: 10
+- cidr: 192.168.20.0/24
+  name: fin
+  gateway: 192.168.20.1
+  hosts: 3
+  vlan: 20
+vlans:
+- id: 10
+  name: RD
+  cidr: 192.168.10.0/24
+- id: 20
+  name: FIN
+  cidr: 192.168.20.0/24
+devices:
+- name: R1
+  role: router
+  model: Router-PT-Empty
+  interfaces:
+  - name: FastEthernet2/0
+  - name: FastEthernet2/0.10
+    ip: 192.168.10.1/24
+    dot1q: 10
+  - name: FastEthernet2/0.20
+    ip: 192.168.20.1/24
+    dot1q: 20
+  - name: Serial0/0
+    shutdown: true
+  - name: Serial1/0
+    shutdown: true
+  - name: FastEthernet3/0
+    shutdown: true
+- name: SW0
+  role: switch
+  model: 2960-24TT
+  interfaces:
+  - name: FastEthernet0/1
+    mode: access
+    vlan: 10
+  - name: FastEthernet0/2
+    mode: access
+    vlan: 10
+  - name: FastEthernet0/3
+    mode: access
+    vlan: 10
+  - name: FastEthernet0/4
+    mode: access
+    vlan: 20
+  - name: FastEthernet0/5
+    mode: access
+    vlan: 20
+  - name: FastEthernet0/6
+    mode: access
+    vlan: 20
+  - name: FastEthernet0/24
+    mode: trunk
+- name: PC0
+  role: pc
+  model: PC-PT
+  ip: 192.168.10.10/24
+  gateway: 192.168.10.1
+- name: PC1
+  role: pc
+  model: PC-PT
+  ip: 192.168.10.11/24
+  gateway: 192.168.10.1
+- name: PC2
+  role: pc
+  model: PC-PT
+  ip: 192.168.10.12/24
+  gateway: 192.168.10.1
+- name: PC3
+  role: pc
+  model: PC-PT
+  ip: 192.168.20.10/24
+  gateway: 192.168.20.1
+- name: PC4
+  role: pc
+  model: PC-PT
+  ip: 192.168.20.11/24
+  gateway: 192.168.20.1
+- name: PC5
+  role: pc
+  model: PC-PT
+  ip: 192.168.20.12/24
+  gateway: 192.168.20.1
+links:
+- from: SW0:FastEthernet0/24
+  to: R1:FastEthernet2/0
+  cable: copper
+- from: PC0:FastEthernet0
+  to: SW0:FastEthernet0/1
+  cable: copper
+- from: PC1:FastEthernet0
+  to: SW0:FastEthernet0/2
+  cable: copper
+- from: PC2:FastEthernet0
+  to: SW0:FastEthernet0/3
+  cable: copper
+- from: PC3:FastEthernet0
+  to: SW0:FastEthernet0/4
+  cable: copper
+- from: PC4:FastEthernet0
+  to: SW0:FastEthernet0/5
+  cable: copper
+- from: PC5:FastEthernet0
+  to: SW0:FastEthernet0/6
+  cable: copper
+routing:
+- device: R1
+  protocol: none
+
+# 验收断言：这些主机对应该通 / 不通（tools/accept.py 据此判定通过）
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC0, PC3]
+    - [PC3, PC0]
+    - [PC4, PC5]

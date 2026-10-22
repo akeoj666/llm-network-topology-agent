@@ -1,0 +1,94 @@
+# UC-03 分公司接入与区域规划（按评分标准附录 UC-03 逐字对齐）
+# 三台路由器 R0 / R1 / R2，两个局域网：
+#   总部 192.168.0.0/24（PC0）    分公司 192.168.1.0/24（PC1）
+# 区域划分：
+#   R0—R1   10.0.0.0/30      → area 0（骨干）
+#   R1—R2   172.16.0.0/30    → area 100
+#   R1—R2   172.19.0.0/30    → area 100（扩展链路，走以太口）
+# OSPF 进程号 1。R1 是 ABR：一边接 area 0，一边接 area 100。
+# 验证点：PC0 与 PC1 跨区互通；R0 / R2 路由表里学到的对端业务网段应带 O IA 标记。
+meta:
+  id: UC-03
+  title: 分公司接入与区域规划
+  source_prompt: 公司收购了外地分公司，总部 192.168.0.0/24、分公司 192.168.1.0/24，三台路由器，R0 和 R1 之间是骨干链路 10.0.0.0/30 放主干区域，R1 和 R2 之间的 172.16.0.0/30 和扩展链路 172.19.0.0/30 放区域 100，OSPF 进程号 1，要求跨区互通并能看到跨区路由标记。
+
+subnets:
+  - { cidr: 10.0.0.0/30, name: backbone, area: 0 }
+  - { cidr: 172.16.0.0/30, name: area100-link, area: 100 }
+  - { cidr: 172.19.0.0/30, name: area100-extra, area: 100 }
+  - { cidr: 192.168.0.0/24, name: hq, gateway: 192.168.0.254, hosts: 1, area: 0 }
+  - { cidr: 192.168.1.0/24, name: branch, gateway: 192.168.1.254, hosts: 1, area: 100 }
+
+devices:
+  - name: R0
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.0.254/24, area: 0 }
+      - { name: Serial0/0, ip: 10.0.0.1/30, area: 0 }
+      - { name: Serial1/0, shutdown: true }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  # ABR：上接 area 0，下接 area 100（两条链路都在 100 里）
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: Serial0/0, ip: 10.0.0.2/30, area: 0 }
+      - { name: Serial1/0, ip: 172.16.0.1/30, area: 100 }
+      - { name: FastEthernet2/0, ip: 172.19.0.1/30, area: 100 }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: R2
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet3/0, ip: 192.168.1.254/24, area: 100 }
+      - { name: Serial0/0, ip: 172.16.0.2/30, area: 100 }
+      - { name: FastEthernet2/0, ip: 172.19.0.2/30, area: 100 }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: SW1
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: PC0
+    role: pc
+    model: PC-PT
+    ip: 192.168.0.10/24
+    gateway: 192.168.0.254
+
+  - name: PC1
+    role: pc
+    model: PC-PT
+    ip: 192.168.1.10/24
+    gateway: 192.168.1.254
+
+links:
+  - { from: "R0:Serial0/0", to: "R1:Serial0/0", cable: serial, subnet: 10.0.0.0/30 }
+  - { from: "R1:Serial1/0", to: "R2:Serial0/0", cable: serial, subnet: 172.16.0.0/30 }
+  - { from: "R1:FastEthernet2/0", to: "R2:FastEthernet2/0", cable: cross, subnet: 172.19.0.0/30 }
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R0:FastEthernet2/0", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW1:FastEthernet0/1", cable: copper }
+  - { from: "SW1:FastEthernet0/24", to: "R2:FastEthernet3/0", cable: copper }
+
+routing:
+  - { device: R0, protocol: ospf, process: 1, area: 0 }
+  - { device: R1, protocol: ospf, process: 1, area: 0 }
+  - { device: R2, protocol: ospf, process: 1, area: 100 }
+
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC0]

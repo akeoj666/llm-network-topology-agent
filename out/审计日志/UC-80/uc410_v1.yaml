@@ -1,0 +1,106 @@
+# UC-80 实验 4-10 ①：RIP v1（有类路由，不支持 VLSM）
+#
+# 拓扑与编址**照实验手册 4-10 原样复刻**（课件第 16 页）：
+#   PC0 192.168.16.1/25   网关 192.168.16.126
+#   PC1 192.168.16.129/26 网关 192.168.16.190
+#   R0  Gig0/0 192.168.16.126/25 | Se0/0/0 30.0.0.1/30 | Gig0/1 10.0.0.1/30
+#   R1  Gig0/0 192.168.16.190/26 | Se0/0/0 30.0.0.2/30 | Gig0/1 20.0.0.1/30
+#   R2  Gig0/0 10.0.0.2/30       | Gig0/1 20.0.0.2/30
+#   R0—R1 走串口 30.0.0.0/30；R0—R2—R1 走以太 10.0.0.0/30 + 20.0.0.0/30（绕行）
+#
+# 型号替换（必须说明）：手册用 2911（Gig0/0、Gig0/1、Se0/0/0），
+# 本项目骨架只有 Router-PT-Empty（Serial0/0、Serial1/0、FastEthernet2/0、FastEthernet3/0）。
+# 映射：Gig0/0 → Fa2/0，Gig0/1 → Fa3/0，Se0/0/0 → Se0/0。接口数够、功能等价，
+# 但**接口名不同**，所以在 PT 里核对时按 Fa2/0 这些名字敲。
+#
+# 本用例要验证的现象（手册第 7 步）：
+#   192.168.16.0/25 与 192.168.16.128/26 是**同一个主网络 192.168.16.0/24** 的两个子网。
+#   RIP v1 通告时不带掩码、只发主网络，R0 和 R1 都认为整个 /24 在自家门口，
+#   于是互相丢弃对方的路由 → **PC0 ping 不通 PC1**。
+#   这不是配错，正是「v1 是有类协议、不支持 VLSM」的证据。
+meta:
+  id: UC-80
+  title: 实验 4-10 RIP v1（有类，不支持 VLSM）
+  source_prompt: 三台路由器两个 PC，左边 192.168.16.0/25 带一台 PC（网关 .126），右边 192.168.16.128/26 带一台 PC（网关 .190），两台边缘路由器之间除了串口直连还有一条绕行路径，全网跑 RIP 第一版，看两个 PC 能不能互通。
+
+subnets:
+  - { cidr: 192.168.16.0/25, name: left, gateway: 192.168.16.126, hosts: 1 }
+  - { cidr: 192.168.16.128/26, name: right, gateway: 192.168.16.190, hosts: 1 }
+  - { cidr: 30.0.0.0/30, name: r0-r1-serial }
+  - { cidr: 10.0.0.0/30, name: r0-r2 }
+  - { cidr: 20.0.0.0/30, name: r1-r2 }
+
+devices:
+  - name: R0
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.126/25 }
+      - { name: FastEthernet3/0, ip: 10.0.0.1/30 }
+      - { name: Serial0/0, ip: 30.0.0.1/30 }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.190/26 }
+      - { name: FastEthernet3/0, ip: 20.0.0.1/30 }
+      - { name: Serial0/0, ip: 30.0.0.2/30 }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: R2
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 10.0.0.2/30 }
+      - { name: FastEthernet3/0, ip: 20.0.0.2/30 }
+      - { name: Serial0/0, shutdown: true }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: SW1
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: PC0
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.1/25
+    gateway: 192.168.16.126
+
+  - name: PC1
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.129/26
+    gateway: 192.168.16.190
+
+links:
+  - { from: "R0:Serial0/0", to: "R1:Serial0/0", cable: serial, subnet: 30.0.0.0/30 }
+  - { from: "R0:FastEthernet3/0", to: "R2:FastEthernet2/0", cable: copper, subnet: 10.0.0.0/30 }
+  - { from: "R1:FastEthernet3/0", to: "R2:FastEthernet3/0", cable: copper, subnet: 20.0.0.0/30 }
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R0:FastEthernet2/0", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW1:FastEthernet0/1", cable: copper }
+  - { from: "SW1:FastEthernet0/24", to: "R1:FastEthernet2/0", cable: copper }
+
+# v1 只有自动汇总，关不掉。写 true 是如实描述，不是选择。
+routing:
+  - { device: R0, protocol: rip, version: 1, auto_summary: true }
+  - { device: R1, protocol: rip, version: 1, auto_summary: true }
+  - { device: R2, protocol: rip, version: 1, auto_summary: true }
+
+# 实验结论：v1 下这两个 PC **不通**（同主网 + 有类汇总）。
+expect:
+  block:
+    - [PC0, PC1]
+    - [PC1, PC0]
