@@ -223,14 +223,25 @@ def _switch_config(topo: Topology, dev: dict) -> list[str]:
         lines.append(f"interface {itf['name']}")
         if itf.get("mode") == "trunk":
             lines += [" switchport mode trunk"]
+            allowed = itf.get("trunk_vlans")
+            if allowed:
+                lines.append(" switchport trunk allowed vlan "
+                             + ",".join(str(v) for v in allowed))
         elif itf.get("vlan"):
             lines += [" switchport mode access", f" switchport access vlan {itf['vlan']}"]
         lines += [" no shutdown", "!"]
-    # 只有配了网关才需要 SVI（交换机做三层网关时才用）
+    # SVI 只给**真正做这个 VLAN 网关的那台交换机**开。
+    # 判据：网关地址就是本设备某个接口的地址。之前只判「这个 VLAN 有没有网关」，
+    # 结果所有交换机都开一遍 SVI——园区网里 5 台交换机各开 5 个 SVI，明显不对。
+    my_ips = {str(i.get("ip") or "").split("/")[0]
+              for i in dev.get("interfaces", []) if i.get("ip")}
     for vid, v in sorted(vlans.items()):
         if not (v.get("cidr") and v.get("gateway")):
             continue
-        ifc = ipaddress.ip_interface(f"{v['gateway']}/{v['cidr'].split('/')[1]}")
+        gw = str(v["gateway"])
+        if gw not in my_ips:
+            continue
+        ifc = ipaddress.ip_interface(f"{gw}/{v['cidr'].split('/')[1]}")
         lines += [
             f"interface vlan {vid}",
             f" ip address {ifc.ip} {netmask(ifc.network.prefixlen)}",

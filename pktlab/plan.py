@@ -142,8 +142,56 @@ def _owner_of_ip(topo, ip: str) -> str:
 
 
 def _isp_devices(topo) -> set[str]:
-    """默认路由的下一跳所在的那台设备 = 上游（ISP / 互联网侧）。"""
+    """谁在互联网侧。
+
+    主判据是**直连公网段**：连着 218.x / 202.x 这类非私有网段的设备就是 ISP。
+    不用「默认路由的下一跳是谁」当主判据——园区里两台路由器常常互指默认路由
+    （园区 → ISP，ISP → 园区），那样会把两台都判成 ISP。
+    """
+    # 先看「公网段里挂着主机的那个网段」——公网 Web 服务器所在的那一段，
+    # 挨着它的设备就是 ISP。这比「凡接公网段就算 ISP」准：
+    # 园区里 202.96.0.0/30 也是公网段，但它只是 ISP 与园区之间的中间段。
+    host_nets = set()
+    for dev in topo.data.get("devices") or []:
+        if _role(dev) not in ("pc", "server") or not dev.get("ip"):
+            continue
+        try:
+            host_nets.add(str(ipaddress.ip_interface(str(dev["ip"])).network))
+        except ValueError:
+            continue
+
     out: set[str] = set()
+    for dev in topo.data.get("devices") or []:
+        for itf in dev.get("interfaces", []):
+            cidr = str(itf.get("ip") or "")
+            if "/" not in cidr:
+                continue
+            try:
+                net = ipaddress.ip_interface(cidr).network
+            except ValueError:
+                continue
+            if not net.is_private and str(net) in host_nets:
+                out.add(str(dev.get("name") or ""))
+                break
+    if out:
+        return out
+
+    # 没有公网主机时，退回「凡接公网段就算 ISP」
+    for dev in topo.data.get("devices") or []:
+        for itf in dev.get("interfaces", []):
+            cidr = str(itf.get("ip") or "")
+            if "/" not in cidr:
+                continue
+            try:
+                net = ipaddress.ip_interface(cidr).network
+            except ValueError:
+                continue
+            if not net.is_private:
+                out.add(str(dev.get("name") or ""))
+                break
+    if out:
+        return out
+    # 退路：没有公网段时，用「默认路由的下一跳属于谁」当判据
     for r in topo.data.get("routing") or []:
         dr = r.get("default_route")
         if not dr:
@@ -156,6 +204,9 @@ def _isp_devices(topo) -> set[str]:
 
 def _layer(dev: dict, topo) -> str:
     role = _role(dev)
+    # 显式标注优先：层次本来就是设计决策，不该靠猜
+    if dev.get("layer"):
+        return str(dev["layer"])
     if role in ("pc", "server"):
         return LAYER_HOST
     if role == "router":
@@ -165,9 +216,9 @@ def _layer(dev: dict, topo) -> str:
             if r.get("device") == dev["name"] and r.get("default_route"):
                 return LAYER_BORDER
         return LAYER_CORE
-    # 交换机：带 trunk / 子接口 / SVI 网关的算汇聚
+    # 交换机：本机做网关的（单臂子接口 / SVI）算汇聚层，纯二层转发算接入层
     for itf in dev.get("interfaces") or []:
-        if itf.get("mode") == "trunk" or itf.get("dot1q"):
+        if itf.get("dot1q"):
             return LAYER_AGG
     for v in topo.data.get("vlans") or []:
         if v.get("gateway") and _has_vlan_port(dev, v["id"]):

@@ -965,21 +965,97 @@ def _l2_checks(topo: Topology) -> list[tuple[bool, str]]:
                 checks.append((False, f"{d['name']} {t} 是 trunk 但没连线"))
                 continue
             rd, rp = nb
-            sub = [
-                i for i in (topo.device(rd) or {}).get("interfaces", [])
-                if i.get("dot1q") in vlans_declared
-            ]
-            have = {i["dot1q"] for i in sub}
-            missing = vlans_declared - have
-            if missing:
-                checks.append(
-                    (False, f"{d['name']} {t} → {rd} {rp}，但 {rd} 缺 VLAN "
-                            f"{'/'.join(str(v) for v in sorted(missing))} 的子接口")
-                )
+            # 这条 trunk 实际要跑哪些 VLAN = 放行的 ∩ 本侧（含下游）需要的
+            carried = _trunk_carried(topo, d["name"], t, vlans_declared)
+            if not carried:
+                checks.append((True, f"{d['name']} {t} trunk → {rd}，这条线上没有要跑的 VLAN"))
+                continue
+            ok, why = _vlan_reaches_gateway(topo, rd, carried, vlans_declared, depth=3)
+            if ok:
+                checks.append((True, f"{d['name']} {t} trunk → {rd}，"
+                                     f"VLAN {'/'.join(str(v) for v in sorted(carried))} 有网关"))
             else:
-                checks.append((True, f"{d['name']} {t} trunk → {rd}，子接口齐备"))
+                checks.append((False, f"{d['name']} {t} → {rd} {rp}：{why}"))
 
     return checks
+
+
+def _trunk_allowed(topo: Topology, dev: str, port: str, vlans_declared: set[int]) -> set[int]:
+    """trunk 口放行的 VLAN。没声明 trunk_vlans 就算放行全部（老用例的默认行为）。"""
+    for itf in (topo.device(dev) or {}).get("interfaces", []):
+        if itf.get("name") != port:
+            continue
+        allowed = itf.get("trunk_vlans")
+        if allowed:
+            return {int(v) for v in allowed}
+        return set(vlans_declared)
+    return set()
+
+
+def _needed_vlans(topo: Topology, dev: str, seen: set[str] | None = None) -> set[int]:
+    """这台交换机（含它下游的交换机）总共需要承载哪些 VLAN。
+
+    接入层常见级联：SW0 下面挂 SW1，SW1 挂 VLAN20 的机器，
+    那 SW0 的上行 trunk 就得同时放行 VLAN10 和 VLAN20。
+    """
+    seen = seen or set()
+    if dev in seen:
+        return set()
+    seen.add(dev)
+    out: set[int] = set()
+    for itf in (topo.device(dev) or {}).get("interfaces", []):
+        if itf.get("mode") == "access" and itf.get("vlan"):
+            out.add(int(itf["vlan"]))
+    for itf in (topo.device(dev) or {}).get("interfaces", []):
+        if itf.get("mode") != "trunk":
+            continue
+        nb = _neighbor(topo, dev, itf["name"])
+        if nb is None:
+            continue
+        rd, _rp = nb
+        if (topo.device(rd) or {}).get("role") == "switch":
+            out |= _needed_vlans(topo, rd, seen)
+    return out
+
+
+def _trunk_carried(topo: Topology, dev: str, port: str, vlans_declared: set[int]) -> set[int]:
+    allowed = _trunk_allowed(topo, dev, port, vlans_declared)
+    return allowed & _needed_vlans(topo, dev)
+
+
+def _vlan_reaches_gateway(
+    topo: Topology, dev: str, vlans: set[int], vlans_declared: set[int], depth: int = 0
+) -> tuple[bool, str]:
+    """这些 VLAN 能不能从 dev 走到网关（路由器子接口）。
+
+    dev 是路由器 → 看它有没有对应子接口；
+    dev 是交换机 → 看它有没有 trunk 能把这些 VLAN 继续送出去（递归往下找路由器）。
+    """
+    role = (topo.device(dev) or {}).get("role")
+    if role == "router":
+        have = {int(i["dot1q"]) for i in (topo.device(dev) or {}).get("interfaces", [])
+                if i.get("dot1q")}
+        missing = vlans - have
+        if missing:
+            return False, (f"{dev} 缺 VLAN {'/'.join(str(v) for v in sorted(missing))} 的子接口")
+        return True, ""
+    if depth <= 0:
+        return False, f"往下追了太多层还没找到网关"
+    for itf in (topo.device(dev) or {}).get("interfaces", []):
+        if itf.get("mode") != "trunk":
+            continue
+        allowed = _trunk_allowed(topo, dev, itf["name"], vlans_declared)
+        if not (vlans & allowed):
+            continue
+        nb = _neighbor(topo, dev, itf["name"])
+        if nb is None:
+            continue
+        rd, _rp = nb
+        ok, why = _vlan_reaches_gateway(topo, rd, vlans & allowed, vlans_declared, depth - 1)
+        if ok:
+            return True, ""
+        last = why
+    return False, f"这条链路上没有能到网关的出口（{last}）"
 
 
 def _static_checks(topo: Topology, nets, adj, igp_all) -> list[tuple[bool, str]]:

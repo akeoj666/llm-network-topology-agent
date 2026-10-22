@@ -91,10 +91,17 @@ class Result:
     positions: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
-def build(topo: Topology, out_path: str | Path, seed: Path = SEED) -> Result:
+def build(topo: Topology, out_path: str | Path, seed: Path | None = None) -> Result:
     topo.validate()
     if not topo.ok:
         raise AssemblyError("DSL 校验未通过：\n" + topo.report())
+
+    # 用例可以自带骨架（设备多的实验要用扩容过的种子）
+    if seed is None:
+        spec = topo.data.get("seed")
+        seed = (Path(__file__).resolve().parents[1] / spec) if spec else SEED
+        if not Path(seed).exists():
+            raise AssemblyError(f"用例指定的骨架不存在：{seed}")
 
     pkt = Pkt.open(seed)
     templates = {

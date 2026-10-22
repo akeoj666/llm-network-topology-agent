@@ -51,6 +51,9 @@ WHITELIST: tuple[str, ...] = (
     r"^ip\s+classless$",
     # 接口
     r"^interface\s+(FastEthernet|GigabitEthernet|Serial|Loopback)\d+/\d+(\.\d+)?$",
+    # SVI（三层交换机做 VLAN 网关）：只放行「进 VLAN 接口」这一条，
+    # 里面的 ip address 仍由上面那条通用规则把关
+    r"^interface\s+vlan\s+\d+$",
     r"^ip\s+address\s+\d+\.\d+\.\d+\.\d+\s+\d+\.\d+\.\d+\.\d+$",
     r"^no\s+ip\s+address$",
     r"^no\s+shutdown$",

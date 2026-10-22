@@ -38,7 +38,7 @@
     "devices": {
       "type": "array",
       "minItems": 2,
-      "maxItems": 20,
+      "maxItems": 40,
       "items": {
         "$ref": "#/$defs/device"
       }
@@ -98,6 +98,10 @@
           }
         }
       }
+    },
+    "seed": {
+      "type": "string",
+      "description": "本用例使用的骨架 pkt（相对仓库根目录）。不填则用默认骨架。"
     }
   },
   "$defs": {
@@ -179,9 +183,34 @@
               },
               "shutdown": {
                 "type": "boolean"
+              },
+              "trunk_vlans": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4094
+                },
+                "description": "trunk 口放行的 VLAN 列表。不写 = 放行全部（老用例的默认行为）"
               }
             }
           }
+        },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "ISP/上游",
+            "边界/出口",
+            "核心层",
+            "核心/骨干",
+            "汇聚层",
+            "汇聚",
+            "接入层",
+            "接入",
+            "终端层",
+            "终端"
+          ],
+          "description": "规划图里的层次。不写则按规则自动推断（见 docs/编址规划书.md）"
         }
       }
     },

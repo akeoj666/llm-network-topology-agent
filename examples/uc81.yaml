@@ -1,0 +1,268 @@
+# UC-81 实验 8-1：构建采用三层网络架构的小型园区网
+#
+# 依据：《8.1 实验8-1 构建采用三层网络架构的小型园区网.pptx》第 5 页的设计图
+# （Internet / ISP 路由器 / 园区路由器 / 核心层 / 汇聚层 / 接入层 五段结构）。
+#
+# ── 与原设计的差异（都是能力边界，不是偷工，见 docs/实验8-1_三层园区网.md）──
+#   ① 3560 多层交换机 → 用 **路由器**承担三层（SVI 改单臂路由子接口）
+#   ② 1941 路由器 → 用 Router-PT-Empty（接口名 FastEthernet2/0 等）
+#   ③ PC 的 DHCP → 静态地址（PT 里手工点 DHCP 即可切回）
+#   ④ NAT 过载 → 不做（Router0 只做 ACL）
+#   ⑤ 汇聚—核心互联：核心只有两个以太口，第三个上联走串口 /30
+#   ⑥ 信息中心 VLAN50 的网关落在汇聚层（Agg2），原设计在核心层 SVI
+#
+# ── 设备与地址（全部照课件）──
+#   园区路由器 Router0  Fa2/0 192.168.3.1/30  Se0/0 200.1.1.2/30
+#   ISP 路由器  Router1  Fa2/0 218.75.230.1/24 Se0/0 200.1.1.1/30
+#   核心层      Core     Fa2/0 192.168.1.2/30  Fa3/0 192.168.2.2/30  Se0/0 192.168.3.2/30
+#   汇聚层      Agg1     Fa2/0.10 192.168.10.254/24  Fa3/0.20 192.168.20.254/24  Se0/0 192.168.1.1/30
+#                Agg2     Fa2/0.30 192.168.30.254/24  Fa3/0.40 192.168.40.254/24
+#                        Fa3/0.50 192.168.50.254/24    Se0/0 192.168.2.1/30
+#   接入层      SW0..SW3（VLAN10/20/30/40）SW4（VLAN50，接在 SW3 的 trunk 上）
+#   终端        PC0..PC7（部门 A/B/C/D 各两台）
+#   信息中心    SRV0 本地 DNS 192.168.50.1/24  SRV1 web/ftp 192.168.50.2/24
+#   公网        SRV2 www.hnust.edu.cn 218.75.230.30/24
+meta:
+  id: UC-81
+  title: 实验 8-1 三层架构小型园区网
+  source_prompt: 构建采用三层网络架构的小型园区网：Internet 服务器 → ISP 路由器 → 园区路由器（NAT+ACL）→ 核心层 → 汇聚层 → 接入层，四个部门各一个 VLAN，信息中心独立 VLAN，PC 用 DHCP 获取地址。
+
+# 设备多，默认骨架只有 12 台，用扩容过的园区网骨架
+seed: seeds/base_campus.pkt
+
+subnets:
+  - { cidr: 218.75.230.0/24, name: internet, gateway: 218.75.230.1, hosts: 1 }
+  - { cidr: 200.1.1.0/30, name: isp-uplink, hosts: 0 }
+  - { cidr: 192.168.3.0/30, name: core-border, hosts: 0 }
+  - { cidr: 192.168.1.0/30, name: core-agg1, hosts: 0 }
+  - { cidr: 192.168.2.0/30, name: core-agg2, hosts: 0 }
+  - { cidr: 192.168.10.0/24, name: dept-a, vlan: 10, gateway: 192.168.10.254, hosts: 2 }
+  - { cidr: 192.168.20.0/24, name: dept-b, vlan: 20, gateway: 192.168.20.254, hosts: 2 }
+  - { cidr: 192.168.30.0/24, name: dept-c, vlan: 30, gateway: 192.168.30.254, hosts: 2 }
+  - { cidr: 192.168.40.0/24, name: dept-d, vlan: 40, gateway: 192.168.40.254, hosts: 2 }
+  - { cidr: 192.168.50.0/24, name: idc, vlan: 50, gateway: 192.168.50.254, hosts: 2 }
+
+vlans:
+  - { id: 10, name: DEPT-A, cidr: 192.168.10.0/24, gateway: 192.168.10.254 }
+  - { id: 20, name: DEPT-B, cidr: 192.168.20.0/24, gateway: 192.168.20.254 }
+  - { id: 30, name: DEPT-C, cidr: 192.168.30.0/24, gateway: 192.168.30.254 }
+  - { id: 40, name: DEPT-D, cidr: 192.168.40.0/24, gateway: 192.168.40.254 }
+  - { id: 50, name: IDC, cidr: 192.168.50.0/24, gateway: 192.168.50.254 }
+
+devices:
+  # ── 园区路由器：ACL 在这里（NAT 过载本项目不做）──
+  - name: Router0
+    role: router
+    model: Router-PT-Empty
+    layer: 边界/出口
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.3.1/30 }
+      - { name: FastEthernet3/0 }
+      - { name: Serial0/0, ip: 200.1.1.2/30 }
+      - { name: Serial1/0, shutdown: true }
+
+  # ── ISP 路由器 ──
+  - name: Router1
+    role: router
+    model: Router-PT-Empty
+    layer: ISP/上游
+    interfaces:
+      - { name: FastEthernet2/0, ip: 218.75.230.1/24 }
+      - { name: FastEthernet3/0 }
+      - { name: Serial0/0, ip: 200.1.1.1/30 }
+      - { name: Serial1/0, shutdown: true }
+
+  # ── 核心层（原 3560 MLS2）：三层选路 ──
+  - name: Core
+    role: router
+    model: Router-PT-Empty
+    layer: 核心层
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.3.2/30 }     # → 园区路由器
+      - { name: FastEthernet3/0, ip: 192.168.2.2/30 }     # → 汇聚 Agg2
+      - { name: Serial0/0, ip: 192.168.1.2/30 }            # → 汇聚 Agg1（口不够，只能走串口）
+      - { name: Serial1/0, shutdown: true }
+
+  # ── 汇聚层（原 3560 MLS0）：VLAN10/20 的网关 ──
+  - name: Agg1
+    role: router
+    model: Router-PT-Empty
+    layer: 汇聚层
+    interfaces:
+      - { name: FastEthernet2/0 }                                   # trunk（VLAN10,20）→ SW0
+      - { name: FastEthernet2/0.10, ip: 192.168.10.254/24, dot1q: 10 }
+      - { name: FastEthernet2/0.20, ip: 192.168.20.254/24, dot1q: 20 }
+      - { name: FastEthernet3/0 }
+      - { name: Serial0/0, ip: 192.168.1.1/30 }                      # → 核心
+      - { name: Serial1/0, shutdown: true }
+
+  # ── 汇聚层（原 3560 MLS1）：VLAN30/40 与信息中心的网关 ──
+  - name: Agg2
+    role: router
+    model: Router-PT-Empty
+    layer: 汇聚层
+    interfaces:
+      - { name: FastEthernet2/0 }                                   # trunk（VLAN30,40,50）→ SW2
+      - { name: FastEthernet2/0.30, ip: 192.168.30.254/24, dot1q: 30 }
+      - { name: FastEthernet2/0.40, ip: 192.168.40.254/24, dot1q: 40 }
+      - { name: FastEthernet2/0.50, ip: 192.168.50.254/24, dot1q: 50 }
+      - { name: FastEthernet3/0, ip: 192.168.2.1/30 }                # → 核心
+      - { name: Serial0/0, shutdown: true }
+      - { name: Serial1/0, shutdown: true }
+
+  # ── 接入层：四个部门各一台 ──
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    layer: 接入层
+    interfaces:
+      - { name: FastEthernet0/1, mode: access, vlan: 10 }
+      - { name: FastEthernet0/2, mode: access, vlan: 10 }
+      - { name: FastEthernet0/3, mode: trunk, trunk_vlans: [10, 20] }   # → 汇聚 Agg1
+      - { name: FastEthernet0/4, mode: trunk, trunk_vlans: [20] }       # → SW1（级联）
+
+  - name: SW1
+    role: switch
+    model: 2960-24TT
+    layer: 接入层
+    interfaces:
+      - { name: FastEthernet0/1, mode: access, vlan: 20 }
+      - { name: FastEthernet0/2, mode: access, vlan: 20 }
+      - { name: FastEthernet0/3, mode: trunk, trunk_vlans: [20] }       # → SW0（级联）
+
+  - name: SW2
+    role: switch
+    model: 2960-24TT
+    layer: 接入层
+    interfaces:
+      - { name: FastEthernet0/1, mode: access, vlan: 30 }
+      - { name: FastEthernet0/2, mode: access, vlan: 30 }
+      - { name: FastEthernet0/3, mode: trunk, trunk_vlans: [30, 40, 50] }  # → 汇聚 Agg2
+      - { name: FastEthernet0/4, mode: trunk, trunk_vlans: [40, 50] }       # → SW3（级联）
+
+  - name: SW3
+    role: switch
+    model: 2960-24TT
+    layer: 接入层
+    interfaces:
+      - { name: FastEthernet0/1, mode: access, vlan: 40 }
+      - { name: FastEthernet0/2, mode: access, vlan: 40 }
+      - { name: FastEthernet0/3, mode: trunk, trunk_vlans: [40, 50] }      # → SW2（级联）
+      - { name: FastEthernet0/4, mode: trunk, trunk_vlans: [50] }          # → SW4（级联）
+
+  # ── 信息中心接入交换机（VLAN50）──
+  - name: SW4
+    role: switch
+    model: 2960-24TT
+    layer: 接入层
+    interfaces:
+      - { name: FastEthernet0/1, mode: access, vlan: 50 }
+      - { name: FastEthernet0/2, mode: access, vlan: 50 }
+      - { name: FastEthernet0/3, mode: trunk, trunk_vlans: [50] }
+
+  # ── 终端：四个部门各两台 ──
+  - { name: PC0, role: pc, model: PC-PT, ip: 192.168.10.11/24, gateway: 192.168.10.254 }
+  - { name: PC1, role: pc, model: PC-PT, ip: 192.168.10.12/24, gateway: 192.168.10.254 }
+  - { name: PC2, role: pc, model: PC-PT, ip: 192.168.20.11/24, gateway: 192.168.20.254 }
+  - { name: PC3, role: pc, model: PC-PT, ip: 192.168.20.12/24, gateway: 192.168.20.254 }
+  - { name: PC4, role: pc, model: PC-PT, ip: 192.168.30.11/24, gateway: 192.168.30.254 }
+  - { name: PC5, role: pc, model: PC-PT, ip: 192.168.30.12/24, gateway: 192.168.30.254 }
+  - { name: PC6, role: pc, model: PC-PT, ip: 192.168.40.11/24, gateway: 192.168.40.254 }
+  - { name: PC7, role: pc, model: PC-PT, ip: 192.168.40.12/24, gateway: 192.168.40.254 }
+
+  # ── 信息中心：本地 DNS / Web / FTP ──
+  - { name: SRV0, role: server, model: PC-PT, ip: 192.168.50.1/24, gateway: 192.168.50.254 }
+  - { name: SRV1, role: server, model: PC-PT, ip: 192.168.50.2/24, gateway: 192.168.50.254 }
+  # ── 公网 Web 服务器 ──
+  - { name: SRV2, role: server, model: PC-PT, ip: 218.75.230.30/24, gateway: 218.75.230.1 }
+
+links:
+  # 公网
+  - { from: "Router1:FastEthernet2/0", to: "SRV2:FastEthernet0", cable: copper, subnet: 218.75.230.0/24 }
+  # ISP ↔ 园区
+  - { from: "Router0:Serial0/0", to: "Router1:Serial0/0", cable: serial, subnet: 200.1.1.0/30 }
+  # 园区 ↔ 核心
+  - { from: "Router0:FastEthernet2/0", to: "Core:FastEthernet2/0", cable: copper, subnet: 192.168.3.0/30 }
+  # 核心 ↔ 汇聚（Agg1 这条走串口：核心的以太口要留给园区和 Agg2）
+  - { from: "Core:Serial0/0", to: "Agg1:Serial0/0", cable: serial, subnet: 192.168.1.0/30 }
+  - { from: "Core:FastEthernet3/0", to: "Agg2:FastEthernet3/0", cable: copper, subnet: 192.168.2.0/30 }
+  # 汇聚 ↔ 接入（每台汇聚只有一个 trunk 口，第二台接入交换机靠级联）
+  - { from: "Agg1:FastEthernet2/0", to: "SW0:FastEthernet0/3", cable: copper }
+  - { from: "Agg2:FastEthernet2/0", to: "SW2:FastEthernet0/3", cable: copper }
+  # 接入层级联：SW0→SW1（承载 VLAN20），SW2→SW3（VLAN40），SW3→SW4（VLAN50）
+  - { from: "SW0:FastEthernet0/4", to: "SW1:FastEthernet0/3", cable: copper }
+  - { from: "SW2:FastEthernet0/4", to: "SW3:FastEthernet0/3", cable: copper }
+  - { from: "SW3:FastEthernet0/4", to: "SW4:FastEthernet0/3", cable: copper }
+  # 终端
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW0:FastEthernet0/2", cable: copper }
+  - { from: "PC2:FastEthernet0", to: "SW1:FastEthernet0/1", cable: copper }
+  - { from: "PC3:FastEthernet0", to: "SW1:FastEthernet0/2", cable: copper }
+  - { from: "PC4:FastEthernet0", to: "SW2:FastEthernet0/1", cable: copper }
+  - { from: "PC5:FastEthernet0", to: "SW2:FastEthernet0/2", cable: copper }
+  - { from: "PC6:FastEthernet0", to: "SW3:FastEthernet0/1", cable: copper }
+  - { from: "PC7:FastEthernet0", to: "SW3:FastEthernet0/2", cable: copper }
+  - { from: "SRV0:FastEthernet0", to: "SW4:FastEthernet0/1", cable: copper }
+  - { from: "SRV1:FastEthernet0", to: "SW4:FastEthernet0/2", cable: copper }
+
+routing:
+  # 汇聚层：默认路由指向核心
+  - device: Agg1
+    protocol: static
+    routes:
+      - { network: 0.0.0.0, mask: 0.0.0.0, next_hop: 192.168.1.2 }   # → 核心 Se0/0
+  - device: Agg2
+    protocol: static
+    routes:
+      - { network: 0.0.0.0, mask: 0.0.0.0, next_hop: 192.168.2.2 }   # → 核心 Fa3/0
+  # 核心：默认路由指向园区
+  - device: Core
+    protocol: static
+    routes:
+      - { network: 0.0.0.0, mask: 0.0.0.0, next_hop: 192.168.3.1 }
+  # 园区：默认路由指向 ISP
+  - device: Router0
+    protocol: static
+    default_route: 200.1.1.1
+  # ISP：默认路由指回园区（公网侧只有一台服务器）
+  - device: Router1
+    protocol: static
+    default_route: 200.1.1.2
+
+acls:
+  # 部门 C/D 不能访问信息中心 VLAN50。
+  # 注意 ACL 的**位置**：原设计把 VLAN50 的网关放在核心层 MLS2，
+  # 部门流量必经园区路由器，ACL 挂在 Router0 上才拦得住。
+  # 我们把 VLAN50 的网关放在汇聚层 Agg2（3560 不可用，见文档），
+  # 部门流量根本不上到 Router0 —— 所以 ACL 必须跟着挪到 Agg2 的 trunk 口。
+  # 策略本身是示例：课件只写了「NAT + ACL 在园区路由器」，没给具体规则。
+  - id: 100
+    type: extended
+    rules:
+      - { action: deny, protocol: ip, source: 192.168.30.0/24, destination: 192.168.50.0/24 }
+      - { action: deny, protocol: ip, source: 192.168.40.0/24, destination: 192.168.50.0/24 }
+      - { action: permit, protocol: ip, source: 0.0.0.0/0, destination: 0.0.0.0/0 }
+    # 挂在两个业务子接口的入方向：VLAN30/40 的帧从 trunk 口进来后，
+    # 就是在这两个子接口上被路由走的，策略在这里才拦得住
+    apply:
+      - { device: Agg2, interface: FastEthernet2/0.30, direction: in }
+      - { device: Agg2, interface: FastEthernet2/0.40, direction: in }
+
+# 断言：部门之间互通、到公网服务器通；部门 C/D 访问信息中心被 ACL 拦住
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC0, PC2]
+    - [PC0, PC4]
+    - [PC0, PC6]
+    - [PC0, SRV2]
+    - [PC2, SRV2]
+    - [PC4, SRV2]
+    - [PC6, SRV2]
+    - [PC0, SRV0]
+    - [PC2, SRV0]
+    - [SRV0, SRV2]
+  block:
+    - [PC4, SRV0]
+    - [PC5, SRV1]
+    - [PC6, SRV0]

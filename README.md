@@ -43,7 +43,7 @@ pktlab/          核心库
   plan.py        编址规划书：分层规划图 + IP/VLAN 表（给人看的那一份）
   nl.py          自然语言 → DSL（DeepSeek）
   pipeline.py    一条龙流水线
-examples/        用例（课内实验 + 实验 4-10 / 4-11）
+examples/        用例（课内实验 + 实验 4-10 / 4-11 / 8-1 三层园区网）
 seeds/           三套骨架 pkt
 tools/           批处理脚本与七套自测
 docs/            评分对照、课内实验对齐、自动化验收、PT 验证清单
