@@ -1,0 +1,26 @@
+# ---- 密钥绝不入库 ----
+.env
+*.key
+*.pem
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ---- 工具缓存 / 一次性素材 ----
+.slidep/
+.workbuddy/
+*.log
+生成
+_pdf_pages/
+_pdf_dump.txt
+_pdf_extract.py
+
+# ---- 逆向 pkt 格式时的临时实验目录（结论已固化进 pktlab/codec.py）----
+spike/
+
+# ---- 拓扑位图由 gen.py 重算，仓库里只留 svg 与 pkt ----
+out/*_topology.png
