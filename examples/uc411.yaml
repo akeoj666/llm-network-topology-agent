@@ -1,0 +1,114 @@
+# UC-82 实验 4-11：验证 OSPF（反掩码、area、按代价选路）
+#
+# 拓扑与编址**照实验手册 4-11 原样复刻**——与实验 4-10 完全共用同一个网络：
+#   PC0 192.168.16.1/25   网关 192.168.16.126
+#   PC1 192.168.16.129/26 网关 192.168.16.190
+#   R0  Gig0/0 192.168.16.126/25 | Se0/0/0 30.0.0.1/30 | Gig0/1 10.0.0.1/30
+#   R1  Gig0/0 192.168.16.190/26 | Se0/0/0 30.0.0.2/30 | Gig0/1 20.0.0.1/30
+#   R2  Gig0/0 10.0.0.2/30       | Gig0/1 20.0.0.2/30
+#
+# 型号替换：手册 2911 → Router-PT-Empty（Gig0/0→Fa2/0，Gig0/1→Fa3/0，Se0/0/0→Se0/0）。
+#
+# 三个验证点，对应手册第 5、6、9 步：
+#   ① **反掩码**：/25 → 0.0.0.127、/26 → 0.0.0.63、/30 → 0.0.0.3。
+#      /25 这一条是最容易写错的（写成 0.0.0.255 就把两个子网合并了）。
+#   ② **area 正确**：手册是单区域，全部 area 0。
+#   ③ **按代价选路（手册第 9 步）**：代价 = 100Mb/s ÷ 带宽，<1 记 1。
+#      以太 100Mb → 代价 1；串口 1.544Mb → 代价 64。
+#      于是 R0→R1 有两条路：串口直连 1 跳代价 64、以太绕行 2 跳代价 1+1=2。
+#      **OSPF 选代价小的那条（绕行 R2），不走串口直连**——这跟 RIP 按跳数选路
+#      正好相反，也是「OSPF 是基于链路状态、认为好的路由是路径代价最少」的证据。
+#      手册第 35 页把两条路的完整代价写成了 66 与 4（两端主机侧以太各算 1），
+#      比较结果与我们按「路由器之间」算的 64 / 2 完全一致——差的那 2 是两端共有的。
+#
+# 第四个验证点，对应手册第 10 步（等价负载均衡）：
+#   **R2 到 30.0.0.0/30 有两条等代价路径**——经 R0（1+64=65）或经 R1（1+64=65），
+#   因为两边都是「一段以太 + 一段串口」。所以手册让在 Router2 上 `ping 30.0.0.2`，
+#   看 IP 数据报是否交替走两条路由。这一点由 `accept._ecmp_asserts()` 推算并断言。
+#
+# **进程号是 100**（手册第 24 页红字注释：配置进程号为100的OSPF），不是 1。
+meta:
+  id: UC-82
+  title: 实验 4-11 验证 OSPF（反掩码 / area / 代价选路）
+  source_prompt: 三台路由器两个 PC，左边 192.168.16.0/25 带一台 PC（网关 .126），右边 192.168.16.128/26 带一台 PC（网关 .190），两台边缘路由器之间串口直连，同时各有一条以太链路接到中间那台路由器，全网跑 OSPF 进程 100 单区域，看两个 PC 是否互通、以及流量走哪条路。
+
+subnets:
+  - { cidr: 192.168.16.0/25, name: left, gateway: 192.168.16.126, hosts: 1, area: 0 }
+  - { cidr: 192.168.16.128/26, name: right, gateway: 192.168.16.190, hosts: 1, area: 0 }
+  - { cidr: 30.0.0.0/30, name: r0-r1-serial, area: 0 }
+  - { cidr: 10.0.0.0/30, name: r0-r2, area: 0 }
+  - { cidr: 20.0.0.0/30, name: r1-r2, area: 0 }
+
+devices:
+  - name: R0
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.126/25, area: 0 }
+      - { name: FastEthernet3/0, ip: 10.0.0.1/30, area: 0 }
+      - { name: Serial0/0, ip: 30.0.0.1/30, area: 0 }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.190/26, area: 0 }
+      - { name: FastEthernet3/0, ip: 20.0.0.1/30, area: 0 }
+      - { name: Serial0/0, ip: 30.0.0.2/30, area: 0 }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: R2
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 10.0.0.2/30, area: 0 }
+      - { name: FastEthernet3/0, ip: 20.0.0.2/30, area: 0 }
+      - { name: Serial0/0, shutdown: true }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: SW1
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: PC0
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.1/25
+    gateway: 192.168.16.126
+
+  - name: PC1
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.129/26
+    gateway: 192.168.16.190
+
+links:
+  - { from: "R0:Serial0/0", to: "R1:Serial0/0", cable: serial, subnet: 30.0.0.0/30 }
+  - { from: "R0:FastEthernet3/0", to: "R2:FastEthernet2/0", cable: copper, subnet: 10.0.0.0/30 }
+  - { from: "R1:FastEthernet3/0", to: "R2:FastEthernet3/0", cable: copper, subnet: 20.0.0.0/30 }
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R0:FastEthernet2/0", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW1:FastEthernet0/1", cable: copper }
+  - { from: "SW1:FastEthernet0/24", to: "R1:FastEthernet2/0", cable: copper }
+
+routing:
+  - { device: R0, protocol: ospf, process: 100, area: 0 }
+  - { device: R1, protocol: ospf, process: 100, area: 0 }
+  - { device: R2, protocol: ospf, process: 100, area: 0 }
+
+# OSPF 无类、按代价选路，两个 PC 通（与 UC-80 的 v1「不通」形成对照）。
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC0]

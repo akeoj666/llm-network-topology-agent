@@ -1,0 +1,95 @@
+# UC-81 实验 4-10 ②：RIP v2（无类，支持 VLSM，关自动汇总）
+#
+# 与 uc410_v1.yaml **同一份拓扑、同一套编址**，只有 routing 段不同
+# （v1 → v2，auto_summary true → false）。这是手册第 9 步的做法：
+# 把 RIPv1 关掉、起 RIPv2，再重跑同一组 ping，看结果变化。
+#
+# 期望：v2 关了自动汇总，按真实前缀 192.168.16.0/25 和 192.168.16.128/26
+# 通告，两边都能学到对方的路由 → **PC0 能 ping 通 PC1**。
+# 与 UC-80 的「不通」构成实验 4-10 的完整对照。
+meta:
+  id: UC-81
+  title: 实验 4-10 RIP v2（无类，支持 VLSM）
+  source_prompt: 三台路由器两个 PC，左边 192.168.16.0/25 带一台 PC（网关 .126），右边 192.168.16.128/26 带一台 PC（网关 .190），两台边缘路由器之间除了串口直连还有一条绕行路径，全网跑 RIP 第二版并关闭自动汇总，看两个 PC 能不能互通。
+
+subnets:
+  - { cidr: 192.168.16.0/25, name: left, gateway: 192.168.16.126, hosts: 1 }
+  - { cidr: 192.168.16.128/26, name: right, gateway: 192.168.16.190, hosts: 1 }
+  - { cidr: 30.0.0.0/30, name: r0-r1-serial }
+  - { cidr: 10.0.0.0/30, name: r0-r2 }
+  - { cidr: 20.0.0.0/30, name: r1-r2 }
+
+devices:
+  - name: R0
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.126/25 }
+      - { name: FastEthernet3/0, ip: 10.0.0.1/30 }
+      - { name: Serial0/0, ip: 30.0.0.1/30 }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.190/26 }
+      - { name: FastEthernet3/0, ip: 20.0.0.1/30 }
+      - { name: Serial0/0, ip: 30.0.0.2/30 }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: R2
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 10.0.0.2/30 }
+      - { name: FastEthernet3/0, ip: 20.0.0.2/30 }
+      - { name: Serial0/0, shutdown: true }
+      - { name: Serial1/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: SW1
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: PC0
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.1/25
+    gateway: 192.168.16.126
+
+  - name: PC1
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.129/26
+    gateway: 192.168.16.190
+
+links:
+  - { from: "R0:Serial0/0", to: "R1:Serial0/0", cable: serial, subnet: 30.0.0.0/30 }
+  - { from: "R0:FastEthernet3/0", to: "R2:FastEthernet2/0", cable: copper, subnet: 10.0.0.0/30 }
+  - { from: "R1:FastEthernet3/0", to: "R2:FastEthernet3/0", cable: copper, subnet: 20.0.0.0/30 }
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R0:FastEthernet2/0", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW1:FastEthernet0/1", cable: copper }
+  - { from: "SW1:FastEthernet0/24", to: "R1:FastEthernet2/0", cable: copper }
+
+# 与 v1 的唯一差别就在这两行：version 2 + auto_summary false。
+routing:
+  - { device: R0, protocol: rip, version: 2, auto_summary: false }
+  - { device: R1, protocol: rip, version: 2, auto_summary: false }
+  - { device: R2, protocol: rip, version: 2, auto_summary: false }
+
+# 实验结论：换成 v2 关自动汇总后，两个 PC **通了**。
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC0]
