@@ -139,6 +139,46 @@ def test_catches_missing_physical_node() -> None:
         )
 
 
+# ---------------------------------------------------------------- 回归测试
+def test_remove_device_keeps_xml_valid() -> None:
+    """回归：删设备之后 XML 必须仍然合法。
+
+    这是上一版真实踩过的坑——给「删设备」加了「顺带删物理视图节点」，
+    用非贪婪正则 ``<NODE>.*?</NODE>`` 切块。物理视图的 NODE 是嵌套的，
+    非贪婪停在内层第一个 ``</NODE>`` 上，切出来的块是「外层开头 + 内层一整块」，
+    把它删掉就带走了外层容器的 ``<CHILDREN>`` 开始标签，留下孤儿的闭合标签。
+    结果所有生成的文件 PT 一律报「The file was not saved correctly」。
+
+    这个测试不复现实现细节，只断言**删完设备 XML 仍然合法** —— 谁再动这块逻辑都得守住。
+    """
+    section("回归：删设备后 XML 保持合法")
+    import xml.etree.ElementTree as ET
+
+    src = ROOT / "seeds" / "base_ospf_3r3sw6pc.pkt"
+    p = pkt.Pkt.open(src)
+    before = len(p.devices())
+    # 删掉一半设备（会连带删链路、动物理视图）
+    victims = [d.name for d in p.devices()][::2]
+    for name in victims:
+        p.remove_device(name)
+    after = len(p.devices())
+    xml = p.to_xml()
+    try:
+        ET.fromstring(xml)
+        ok = True
+    except ET.ParseError as exc:
+        ok = False
+        print(f"      解析失败：{exc}")
+    check(ok, f"删掉 {before - after} 台设备后 XML 仍合法（{before} → {after}）")
+
+    # 再验：删完之后写盘再读回来也得一致
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "after_remove.pkt"
+        p.save(out)
+        back = pkt.read_pt_file(out).decode("utf-8")
+        check(back == xml, "删设备后写盘再读回，内容一致")
+
+
 # ---------------------------------------------------------------- 正向测试
 def test_native_pt_files_pass() -> None:
     section("正向：PT 9.0.1 自带的原生文件必须零误报")
@@ -188,6 +228,7 @@ def main() -> int:
     test_catches_duplicate_ids()
     test_catches_duplicate_mem_addr()
     test_catches_missing_physical_node()
+    test_remove_device_keeps_xml_valid()
     test_native_pt_files_pass()
     test_our_seeds_pass()
 

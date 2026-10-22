@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import re
 import sys
+import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
 
@@ -45,6 +46,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pktlab import clone, pkt  # noqa: E402
+from pktlab.pkt import _iter_nodes  # noqa: E402
 
 DEV_RE = re.compile(r"<DEVICE>.*?</DEVICE>", re.S)
 NAME_RE = re.compile(
@@ -69,84 +71,20 @@ class Report:
         self.info.append(msg)
 
 
-def _children_inner(block: str) -> str:
-    """取一个 NODE 块里 ``<CHILDREN>`` 的**全部**内容（正确处理嵌套）。
-
-    ``<CHILDREN>(.*?)</CHILDREN>`` 的非贪婪在嵌套时会停在内层那个
-    ``</CHILDREN>`` 上，外层还套着的设备就漏了。所以这里数深度。
-    """
-    i = block.find("<CHILDREN>")
-    if i < 0:
-        return ""
-    start = i + len("<CHILDREN>")
-    depth = 1
-    pos = start
-    while depth > 0:
-        nxt_open = block.find("<CHILDREN>", pos)
-        nxt_close = block.find("</CHILDREN>", pos)
-        if nxt_close < 0:
-            return block[start:]
-        if nxt_open >= 0 and nxt_open < nxt_close:
-            depth += 1
-            pos = nxt_open + len("<CHILDREN>")
-        else:
-            depth -= 1
-            if depth == 0:
-                return block[start:nxt_close]
-            pos = nxt_close + len("</CHILDREN>")
-    return block[start:]
-
-
-def _split_nodes(seg: str) -> list[str]:
-    """把一段 XML 里的**所有** ``<NODE>`` 块切出来（含嵌套的每一层）。
-
-    不能用 ``<NODE>.*?</NODE>``：NODE 是嵌套的（Intercity → Home City → …），
-    非贪婪只能切到最外层那一层，内层的设备节点就全漏了。
-    也不能顺着 ``i=j`` 迭代：那同样只会切出最外层。
-    正确做法是**逐层递归** —— 外层块的 ``<CHILDREN>`` 里装着内层块。
-    """
-    blocks: list[str] = []
-
-    def walk(s: str) -> None:
-        i = 0
-        while True:
-            start = s.find("<NODE>", i)
-            if start < 0:
-                return
-            # 从 start 开始找配对的 </NODE>（维护嵌套深度）
-            depth = 0
-            j = start
-            while True:
-                m = re.compile(r"<NODE>|</NODE>").search(s, j)
-                if not m:
-                    break
-                depth += 1 if m.group(0) == "<NODE>" else -1
-                j = m.end()
-                if depth == 0:
-                    break
-            block = s[start:j]
-            blocks.append(block)
-            # 递归进它的 CHILDREN
-            inner = _children_inner(block)
-            if inner:
-                walk(inner)
-            i = j
-
-    walk(seg)
-    return blocks
-
-
 def _physical_nodes(raw: str) -> dict[str, str]:
-    """物理视图里 ``节点名 → UUID_STR``（同名节点取最后一个以外的全都要留）。
+    """物理视图里 ``节点名 → UUID_STR``。
 
     物理视图是嵌套树：Intercity → Home City → Corporate Office → …
     每台设备是一个叶子 NODE，``UUID_STR`` 是它的身份。
+
+    切块复用 ``pktlab.pkt._iter_nodes`` —— 它按标签深度配对切，
+    不用非贪婪正则（非贪婪在嵌套结构上只会切到最外层，内层设备全漏）。
     """
     m = re.search(r"<PHYSICALWORKSPACE>(.*)</PHYSICALWORKSPACE>", raw, re.S)
     if not m:
         return {}
     out: dict[str, str] = {}
-    for blk in _split_nodes(m.group(1)):
+    for _start, _end, blk in _iter_nodes(m.group(1)):
         nm = re.search(r'<NAME translate="true">([^<]*)</NAME>', blk)
         uu = re.search(r"<UUID_STR>([^<]*)</UUID_STR>", blk)
         if nm and uu:
@@ -183,6 +121,19 @@ def verify(path: str | Path) -> Report:
         # PT 6 之前的旧格式我们的解码器不支持（PT 自带的示例里就有 4 个这种），
         # 这不是我们生成的文件的问题，降级为警告。
         rep.warn(f"解不开这个容器（可能是 PT 6 之前的旧格式，与本项目无关）：{exc}")
+        return rep
+
+    # ---- 0. XML 良构性（最容易漏、后果最严重的一条）----
+    # 上一版的教训：给「删设备」加了「顺带删物理视图节点」，用非贪婪正则切 NODE 块，
+    # 把外层容器的 <CHILDREN> 开始标签一起删掉了，留下孤儿的 </CHILDREN>。
+    # 结果：所有生成的文件 PT 一律报「The file was not saved correctly」。
+    # 而那版校验器只做正则检查，压根没验 XML 是否合法，所以全绿通过。
+    # 这条必须排在所有检查之前 —— 结构都坏了，后面查什么都没有意义。
+    try:
+        ET.fromstring(raw)
+    except ET.ParseError as exc:
+        rep.err(f"XML 结构损坏（PT 会报「文件没有正确保存」）：{exc}")
+        # 结构已坏，继续查其它规则只会产生噪音
         return rep
 
     blocks = [b.group(0) for b in DEV_RE.finditer(raw)]

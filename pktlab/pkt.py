@@ -52,6 +52,86 @@ def _unesc(text: str) -> str:
     return text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 
 
+_NODE_TAG_RE = re.compile(r"<NODE>|</NODE>")
+
+
+def _iter_nodes(seg: str) -> list[tuple[int, int, str]]:
+    """把一段 XML 里**所有** ``<NODE>`` 块按深度配对切出来（含嵌套的每一层）。
+
+    返回 ``[(start, end, block), ...]``，start/end 是在 ``seg`` 里的下标。
+
+    为什么不能用 ``re.finditer(r"<NODE>.*?</NODE>")``：NODE 是嵌套的，
+    非贪婪会停在内层第一个 ``</NODE>`` 上，切出来的块是「外层开头 + 内层一整块」，
+    拿它去做删除/替换必然破坏 XML 结构。
+
+    这里从每个 ``<NODE>`` 出发数深度，找到与它配对的 ``</NODE>``；
+    对嵌套的子节点再递归进去收集，保证外层和内层的块都是完整的。
+    """
+    out: list[tuple[int, int, str]] = []
+
+    def walk(base: int, s: str) -> None:
+        i = 0
+        while True:
+            start = s.find("<NODE>", i)
+            if start < 0:
+                return
+            depth = 0
+            j = start
+            while True:
+                m = _NODE_TAG_RE.search(s, j)
+                if not m:
+                    return
+                depth += 1 if m.group(0) == "<NODE>" else -1
+                j = m.end()
+                if depth == 0:
+                    break
+            block = s[start:j]
+            out.append((base + start, base + j, block))
+            # 递归进它的 CHILDREN（子节点也要能被单独定位）。
+            # 只取 <CHILDREN> 与配对 </CHILDREN> 之间的内容 —— 直接取到块末尾的话，
+            # 会把这层节点自己的收尾标签也算进去，递归时错位。
+            ci = block.find("<CHILDREN>")
+            if ci >= 0:
+                inner_start = ci + len("<CHILDREN>")
+                depth = 1
+                k = inner_start
+                while depth > 0:
+                    mo = block.find("<CHILDREN>", k)
+                    mc = block.find("</CHILDREN>", k)
+                    if mc < 0:
+                        break
+                    if mo >= 0 and mo < mc:
+                        depth += 1
+                        k = mo + len("<CHILDREN>")
+                    else:
+                        depth -= 1
+                        k = mc + len("</CHILDREN>")
+                        if depth == 0:
+                            inner_end = mc
+                            break
+                else:
+                    inner_end = len(block)
+                if depth == 0:
+                    walk(base + start + inner_start, block[inner_start:inner_end])
+            i = j
+
+    walk(0, seg)
+    return out
+
+
+def _innermost_node(seg: str, uuid_str: str) -> tuple[int, int, str] | None:
+    """找包含指定 uuid 的**最内层** NODE 块。
+
+    外层容器的块里也包含这个 uuid（整棵子树都在里面），所以不能取第一个匹配，
+    要取最短的那个 —— 那就是设备自己的节点。
+    """
+    needle = f"<UUID_STR>{uuid_str}</UUID_STR>"
+    hits = [n for n in _iter_nodes(seg) if needle in n[2]]
+    if not hits:
+        return None
+    return min(hits, key=lambda n: n[1] - n[0])
+
+
 class Device:
     """单台设备的视图，改动立即写回到所属 Pkt 的块数组。"""
 
@@ -116,10 +196,8 @@ class Device:
         m = _NAME_RE.search(self.block)
         if not m:
             raise ValueError(f"{self.name}: 找不到 NAME 节点")
-        old_name = _unesc(m.group(2))
         block = self.block[: m.start(2)] + _esc(new_name) + self.block[m.end(2) :]
         self.pkt.blocks[self.index] = block
-        self.pkt.sync_physical_name(old_name, new_name)
         return self
 
     def set_config(self, lines: list[str]) -> "Device":
@@ -321,15 +399,20 @@ class Pkt:
         return self
 
     def remove_device(self, name: str) -> "Pkt":
-        """删除设备，并连带删除所有引用它的链路。"""
+        """删除设备，并连带删除所有引用它的链路。
+
+        注意：**不动物理视图（机架图）里的节点**。
+
+        机架图上会留下这台设备的旧节点，看起来「脏」，但 PT 完全容忍——
+        已实测：带这种残留节点的文件能正常打开、能 ping 通。
+        反过来，去删那些节点是**没有收益的风险**：上一版就是在这里
+        用非贪婪正则切 NODE 块，把外层容器的 ``<CHILDREN>`` 开始标签一起删掉，
+        留下孤儿的闭合标签，XML 直接损坏，PT 报「The file was not saved correctly」。
+
+        所以这里保持「只删设备块与链路」的原始行为。
+        """
         target = self.by_name(name)
         ref = target.ref
-        # 物理视图（机架图）里也要删掉这个节点，否则删掉的设备还留在机架图上
-        uuid_str = ""
-        m = re.search(r"<PHYSICAL>([^<]*)</PHYSICAL>", target.block)
-        if m:
-            items = [x.strip() for x in m.group(1).split(",") if x.strip()]
-            uuid_str = items[-1] if items else ""
         keep = [b for i, b in enumerate(self.blocks) if i != target.index]
         xml = self.parts[0]
         for i, blk in enumerate(keep):
@@ -340,24 +423,7 @@ class Pkt:
             r"<LINK>.*?</LINK>", lambda m: "" if ref in m.group(0) else m.group(0), xml, flags=re.S
         )
         self.__init__(xml)
-        if uuid_str:
-            self._remove_physical_node(uuid_str)
         return self
-
-    def _remove_physical_node(self, uuid_str: str) -> None:
-        """从物理视图里删掉 UUID_STR 指定的节点。"""
-        xml = self.to_xml()
-        ws = re.search(r"<PHYSICALWORKSPACE>(.*)</PHYSICALWORKSPACE>", xml, re.S)
-        if not ws:
-            return
-        seg = ws.group(1)
-        for nm in re.finditer(r"<NODE>.*?</NODE>", seg, re.S):
-            if f"<UUID_STR>{uuid_str}</UUID_STR>" not in nm.group(0):
-                continue
-            seg = seg[: nm.start()] + seg[nm.end() :]
-            xml = xml[: ws.start(1)] + seg + xml[ws.end(1) :]
-            self.__init__(xml)
-            return
 
     # ---- 画布便签 ----
     def set_notes(self, items: list[tuple[str, float, float]]) -> "Pkt":
@@ -386,53 +452,6 @@ class Pkt:
             )
         xml = xml[: target.start(1)] + body + "\n  " + xml[target.end(1) :]
         self.__init__(xml)
-        return self
-
-    def sync_physical_name(self, old_name: str, new_name: str) -> "Pkt":
-        """设备改名后，同步物理视图（机架图）里对应节点的 NAME。
-
-        物理视图与设备块是**两处**独立的记录，PT 靠 ``PHYSICAL`` 链末位的
-        uuid 对账，所以名字不一致也**不影响加载**（PT 允许改名）。
-        但机架图上会显示旧名字，看着像「设备没改名成功」。
-
-        这里按 uuid 精确定位那个 NODE 再改名字 —— 不能按名字找，
-        因为同一台设备改名前后的名字本来就不同。
-        """
-        dev = None
-        for d in self.devices():
-            if d.name == new_name:
-                dev = d
-                break
-        if dev is None:
-            return self
-        m = re.search(r"<PHYSICAL>([^<]*)</PHYSICAL>", dev.block)
-        if not m:
-            return self
-        items = [x.strip() for x in m.group(1).split(",") if x.strip()]
-        if not items:
-            return self
-        uuid_str = items[-1]
-
-        xml = self.to_xml()
-        ws = re.search(r"<PHYSICALWORKSPACE>(.*)</PHYSICALWORKSPACE>", xml, re.S)
-        if not ws:
-            return self
-        seg = ws.group(1)
-        # 找 UUID_STR 等于该 uuid 的 NODE，改掉它的 NAME
-        for nm in re.finditer(r"<NODE>.*?</NODE>", seg, re.S):
-            blk = nm.group(0)
-            if f"<UUID_STR>{uuid_str}</UUID_STR>" not in blk:
-                continue
-            new_blk = re.sub(
-                r'(<NAME translate="true">)([^<]*)(</NAME>)',
-                lambda mm: mm.group(1) + _esc(new_name) + mm.group(3),
-                blk,
-                count=1,
-            )
-            seg = seg[: nm.start()] + new_blk + seg[nm.end() :]
-            xml = xml[: ws.start(1)] + seg + xml[ws.end(1) :]
-            self.__init__(xml)
-            return self
         return self
 
     # ---- 全局处理 ----
