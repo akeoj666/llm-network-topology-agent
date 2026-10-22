@@ -1,6 +1,6 @@
-# UC-81 实验 8-1 三层架构小型园区网
+# UC-81 实验 4-10 RIP v2（无类，支持 VLSM）
 
-> 需求原文：构建采用三层网络架构的小型园区网：Internet 服务器 → ISP 路由器 → 园区路由器（NAT+ACL）→ 核心层 → 汇聚层 → 接入层，四个部门各一个 VLAN，信息中心独立 VLAN，PC 用 DHCP 获取地址。
+> 需求原文：三台路由器两个 PC，左边 192.168.16.0/25 带一台 PC（网关 .126），右边 192.168.16.128/26 带一台 PC（网关 .190），两台边缘路由器之间除了串口直连还有一条绕行路径，全网跑 RIP 第二版并关闭自动汇总，看两个 PC 能不能互通。
 
 ## 怎么用（先说结论）
 
@@ -79,38 +79,15 @@ exit
 
 | 设备 | 端口 | 对端设备 | 对端端口 | 线型 |
 |---|---|---|---|---|
-| Router1 | FastEthernet2/0 | SRV2 | FastEthernet0 | 交叉线 |
-| Router0 | Serial0/0 | Router1 | Serial0/0 | 串口线 |
-| Router0 | FastEthernet2/0 | Core | FastEthernet2/0 | 交叉线 |
-| Core | Serial0/0 | Agg1 | Serial0/0 | 串口线 |
-| Core | FastEthernet3/0 | Agg2 | FastEthernet3/0 | 交叉线 |
-| Agg1 | FastEthernet2/0 | SW0 | FastEthernet0/3 | 直通线 |
-| Agg2 | FastEthernet2/0 | SW2 | FastEthernet0/3 | 直通线 |
-| SW0 | FastEthernet0/4 | SW1 | FastEthernet0/3 | 交叉线 |
-| SW2 | FastEthernet0/4 | SW3 | FastEthernet0/3 | 交叉线 |
-| SW3 | FastEthernet0/4 | SW4 | FastEthernet0/3 | 交叉线 |
+| R0 | Serial0/0 | R1 | Serial0/0 | 串口线 |
+| R0 | FastEthernet3/0 | R2 | FastEthernet2/0 | 交叉线 |
+| R1 | FastEthernet3/0 | R2 | FastEthernet3/0 | 交叉线 |
 | PC0 | FastEthernet0 | SW0 | FastEthernet0/1 | 直通线 |
-| PC1 | FastEthernet0 | SW0 | FastEthernet0/2 | 直通线 |
-| PC2 | FastEthernet0 | SW1 | FastEthernet0/1 | 直通线 |
-| PC3 | FastEthernet0 | SW1 | FastEthernet0/2 | 直通线 |
-| PC4 | FastEthernet0 | SW2 | FastEthernet0/1 | 直通线 |
-| PC5 | FastEthernet0 | SW2 | FastEthernet0/2 | 直通线 |
-| PC6 | FastEthernet0 | SW3 | FastEthernet0/1 | 直通线 |
-| PC7 | FastEthernet0 | SW3 | FastEthernet0/2 | 直通线 |
-| SRV0 | FastEthernet0 | SW4 | FastEthernet0/1 | 直通线 |
-| SRV1 | FastEthernet0 | SW4 | FastEthernet0/2 | 直通线 |
+| SW0 | FastEthernet0/24 | R0 | FastEthernet2/0 | 直通线 |
+| PC1 | FastEthernet0 | SW1 | FastEthernet0/1 | 直通线 |
+| SW1 | FastEthernet0/24 | R1 | FastEthernet2/0 | 直通线 |
 
-## VLAN 规划
-
-| VLAN | 名称 | 网段 |
-|---|---|---|
-| 10 | DEPT-A | 192.168.10.0/24 |
-| 20 | DEPT-B | 192.168.20.0/24 |
-| 30 | DEPT-C | 192.168.30.0/24 |
-| 40 | DEPT-D | 192.168.40.0/24 |
-| 50 | IDC | 192.168.50.0/24 |
-
-## Router0（router）
+## R0（router）
 
 ```
 version 12.2
@@ -118,28 +95,33 @@ no service timestamps log datetime msec
 no service timestamps debug datetime msec
 no service password-encryption
 !
-hostname Router0
+hostname R0
 !
 no ip cef
 no ipv6 cef
 !
 interface FastEthernet2/0
- ip address 192.168.3.1 255.255.255.252
+ ip address 192.168.16.126 255.255.255.128
  no shutdown
 !
 interface FastEthernet3/0
- no ip address
+ ip address 10.0.0.1 255.255.255.252
  no shutdown
 !
 interface Serial0/0
- ip address 200.1.1.2 255.255.255.252
+ ip address 30.0.0.1 255.255.255.252
  no shutdown
 !
 interface Serial1/0
  no ip address
  shutdown
 !
-ip route 0.0.0.0 0.0.0.0 200.1.1.1
+router rip
+ version 2
+ no auto-summary
+ network 192.168.16.0
+ network 10.0.0.0
+ network 30.0.0.0
 !
 ip classless
 !
@@ -151,7 +133,7 @@ line vty 0 4
 end
 ```
 
-## Router1（router）
+## R1（router）
 
 ```
 version 12.2
@@ -159,21 +141,21 @@ no service timestamps log datetime msec
 no service timestamps debug datetime msec
 no service password-encryption
 !
-hostname Router1
+hostname R1
 !
 no ip cef
 no ipv6 cef
 !
 interface FastEthernet2/0
- ip address 218.75.230.1 255.255.255.0
+ ip address 192.168.16.190 255.255.255.192
  no shutdown
 !
 interface FastEthernet3/0
- no ip address
+ ip address 20.0.0.1 255.255.255.252
  no shutdown
 !
 interface Serial0/0
- ip address 200.1.1.1 255.255.255.252
+ ip address 30.0.0.2 255.255.255.252
  clock rate 2000000
  no shutdown
 !
@@ -181,7 +163,12 @@ interface Serial1/0
  no ip address
  shutdown
 !
-ip route 0.0.0.0 0.0.0.0 200.1.1.2
+router rip
+ version 2
+ no auto-summary
+ network 192.168.16.0
+ network 20.0.0.0
+ network 30.0.0.0
 !
 ip classless
 !
@@ -193,7 +180,7 @@ line vty 0 4
 end
 ```
 
-## Core（router）
+## R2（router）
 
 ```
 version 12.2
@@ -201,131 +188,17 @@ no service timestamps log datetime msec
 no service timestamps debug datetime msec
 no service password-encryption
 !
-hostname Core
+hostname R2
 !
 no ip cef
 no ipv6 cef
 !
 interface FastEthernet2/0
- ip address 192.168.3.2 255.255.255.252
+ ip address 10.0.0.2 255.255.255.252
  no shutdown
 !
 interface FastEthernet3/0
- ip address 192.168.2.2 255.255.255.252
- no shutdown
-!
-interface Serial0/0
- ip address 192.168.1.2 255.255.255.252
- no shutdown
-!
-interface Serial1/0
- no ip address
- shutdown
-!
-ip route 0.0.0.0 0.0.0.0 192.168.3.1
-!
-ip classless
-!
-line con 0
-!
-line vty 0 4
- login
-!
-end
-```
-
-## Agg1（router）
-
-```
-version 12.2
-no service timestamps log datetime msec
-no service timestamps debug datetime msec
-no service password-encryption
-!
-hostname Agg1
-!
-no ip cef
-no ipv6 cef
-!
-interface FastEthernet2/0
- no ip address
- no shutdown
-!
-interface FastEthernet2/0.10
- encapsulation dot1Q 10
- ip address 192.168.10.254 255.255.255.0
- no shutdown
-!
-interface FastEthernet2/0.20
- encapsulation dot1Q 20
- ip address 192.168.20.254 255.255.255.0
- no shutdown
-!
-interface FastEthernet3/0
- no ip address
- no shutdown
-!
-interface Serial0/0
- ip address 192.168.1.1 255.255.255.252
- clock rate 2000000
- no shutdown
-!
-interface Serial1/0
- no ip address
- shutdown
-!
-ip route 0.0.0.0 0.0.0.0 192.168.1.2
-!
-ip classless
-!
-line con 0
-!
-line vty 0 4
- login
-!
-end
-```
-
-## Agg2（router）
-
-```
-version 12.2
-no service timestamps log datetime msec
-no service timestamps debug datetime msec
-no service password-encryption
-!
-hostname Agg2
-!
-no ip cef
-no ipv6 cef
-!
-access-list 100 deny ip 192.168.30.0 0.0.0.255 192.168.50.0 0.0.0.255
-access-list 100 deny ip 192.168.40.0 0.0.0.255 192.168.50.0 0.0.0.255
-access-list 100 permit ip 0.0.0.0 255.255.255.255 0.0.0.0 255.255.255.255
-!
-interface FastEthernet2/0
- no ip address
- no shutdown
-!
-interface FastEthernet2/0.30
- encapsulation dot1Q 30
- ip address 192.168.30.254 255.255.255.0
- ip access-group 100 in
- no shutdown
-!
-interface FastEthernet2/0.40
- encapsulation dot1Q 40
- ip address 192.168.40.254 255.255.255.0
- ip access-group 100 in
- no shutdown
-!
-interface FastEthernet2/0.50
- encapsulation dot1Q 50
- ip address 192.168.50.254 255.255.255.0
- no shutdown
-!
-interface FastEthernet3/0
- ip address 192.168.2.1 255.255.255.252
+ ip address 20.0.0.2 255.255.255.252
  no shutdown
 !
 interface Serial0/0
@@ -336,7 +209,11 @@ interface Serial1/0
  no ip address
  shutdown
 !
-ip route 0.0.0.0 0.0.0.0 192.168.2.2
+router rip
+ version 2
+ no auto-summary
+ network 10.0.0.0
+ network 20.0.0.0
 !
 ip classless
 !
@@ -361,39 +238,10 @@ hostname SW0
 no ip cef
 no ipv6 cef
 !
-vlan 10
- name DEPT-A
-!
-vlan 20
- name DEPT-B
-!
-vlan 30
- name DEPT-C
-!
-vlan 40
- name DEPT-D
-!
-vlan 50
- name IDC
-!
 interface FastEthernet0/1
- switchport mode access
- switchport access vlan 10
  no shutdown
 !
-interface FastEthernet0/2
- switchport mode access
- switchport access vlan 10
- no shutdown
-!
-interface FastEthernet0/3
- switchport mode trunk
- switchport trunk allowed vlan 10,20
- no shutdown
-!
-interface FastEthernet0/4
- switchport mode trunk
- switchport trunk allowed vlan 20
+interface FastEthernet0/24
  no shutdown
 !
 end
@@ -412,182 +260,10 @@ hostname SW1
 no ip cef
 no ipv6 cef
 !
-vlan 10
- name DEPT-A
-!
-vlan 20
- name DEPT-B
-!
-vlan 30
- name DEPT-C
-!
-vlan 40
- name DEPT-D
-!
-vlan 50
- name IDC
-!
 interface FastEthernet0/1
- switchport mode access
- switchport access vlan 20
  no shutdown
 !
-interface FastEthernet0/2
- switchport mode access
- switchport access vlan 20
- no shutdown
-!
-interface FastEthernet0/3
- switchport mode trunk
- switchport trunk allowed vlan 20
- no shutdown
-!
-end
-```
-
-## SW2（switch）
-
-```
-version 12.2
-no service timestamps log datetime msec
-no service timestamps debug datetime msec
-no service password-encryption
-!
-hostname SW2
-!
-no ip cef
-no ipv6 cef
-!
-vlan 10
- name DEPT-A
-!
-vlan 20
- name DEPT-B
-!
-vlan 30
- name DEPT-C
-!
-vlan 40
- name DEPT-D
-!
-vlan 50
- name IDC
-!
-interface FastEthernet0/1
- switchport mode access
- switchport access vlan 30
- no shutdown
-!
-interface FastEthernet0/2
- switchport mode access
- switchport access vlan 30
- no shutdown
-!
-interface FastEthernet0/3
- switchport mode trunk
- switchport trunk allowed vlan 30,40,50
- no shutdown
-!
-interface FastEthernet0/4
- switchport mode trunk
- switchport trunk allowed vlan 40,50
- no shutdown
-!
-end
-```
-
-## SW3（switch）
-
-```
-version 12.2
-no service timestamps log datetime msec
-no service timestamps debug datetime msec
-no service password-encryption
-!
-hostname SW3
-!
-no ip cef
-no ipv6 cef
-!
-vlan 10
- name DEPT-A
-!
-vlan 20
- name DEPT-B
-!
-vlan 30
- name DEPT-C
-!
-vlan 40
- name DEPT-D
-!
-vlan 50
- name IDC
-!
-interface FastEthernet0/1
- switchport mode access
- switchport access vlan 40
- no shutdown
-!
-interface FastEthernet0/2
- switchport mode access
- switchport access vlan 40
- no shutdown
-!
-interface FastEthernet0/3
- switchport mode trunk
- switchport trunk allowed vlan 40,50
- no shutdown
-!
-interface FastEthernet0/4
- switchport mode trunk
- switchport trunk allowed vlan 50
- no shutdown
-!
-end
-```
-
-## SW4（switch）
-
-```
-version 12.2
-no service timestamps log datetime msec
-no service timestamps debug datetime msec
-no service password-encryption
-!
-hostname SW4
-!
-no ip cef
-no ipv6 cef
-!
-vlan 10
- name DEPT-A
-!
-vlan 20
- name DEPT-B
-!
-vlan 30
- name DEPT-C
-!
-vlan 40
- name DEPT-D
-!
-vlan 50
- name IDC
-!
-interface FastEthernet0/1
- switchport mode access
- switchport access vlan 50
- no shutdown
-!
-interface FastEthernet0/2
- switchport mode access
- switchport access vlan 50
- no shutdown
-!
-interface FastEthernet0/3
- switchport mode trunk
- switchport trunk allowed vlan 50
+interface FastEthernet0/24
  no shutdown
 !
 end
@@ -595,55 +271,10 @@ end
 
 ## PC0（主机）
 
-- IP：192.168.10.11/24
-- 网关：192.168.10.254
+- IP：192.168.16.1/25
+- 网关：192.168.16.126
 
 ## PC1（主机）
 
-- IP：192.168.10.12/24
-- 网关：192.168.10.254
-
-## PC2（主机）
-
-- IP：192.168.20.11/24
-- 网关：192.168.20.254
-
-## PC3（主机）
-
-- IP：192.168.20.12/24
-- 网关：192.168.20.254
-
-## PC4（主机）
-
-- IP：192.168.30.11/24
-- 网关：192.168.30.254
-
-## PC5（主机）
-
-- IP：192.168.30.12/24
-- 网关：192.168.30.254
-
-## PC6（主机）
-
-- IP：192.168.40.11/24
-- 网关：192.168.40.254
-
-## PC7（主机）
-
-- IP：192.168.40.12/24
-- 网关：192.168.40.254
-
-## SRV0（主机）
-
-- IP：192.168.50.1/24
-- 网关：192.168.50.254
-
-## SRV1（主机）
-
-- IP：192.168.50.2/24
-- 网关：192.168.50.254
-
-## SRV2（主机）
-
-- IP：218.75.230.30/24
-- 网关：218.75.230.1
+- IP：192.168.16.129/26
+- 网关：192.168.16.190

@@ -139,7 +139,21 @@ def render(
     show_links: bool = True,
 ) -> Path:
     pos = _positions(topo)
-    fig, ax = plt.subplots(figsize=(10.6, 6.0), dpi=200)
+
+    # 画布尺寸按内容自适应：21 台设备挤在固定尺寸里必然压字。
+    # 宽度随最宽的一层走，高度随层数走，但都留上下限。
+    if pos:
+        cols = [c for c, _ in pos.values()]
+        rows = [r for _, r in pos.values()]
+        span_x = max(cols) - min(cols) or 1
+        span_y = max(rows) - min(rows) or 1
+        # 内容本身的宽高比：图上要按这个比例出图，否则 aspect=equal 会把内容压扁
+        # （21 台设备时纵向一压扁，整张图变成横条，标签全叠在一起）
+        width = min(24.0, max(10.0, span_x * 1.05 + 3.0))
+        height = min(15.0, max(6.0, span_y * 2.3 + 3.6))
+    else:
+        width, height = 10.6, 6.0
+    fig, ax = plt.subplots(figsize=(width, height), dpi=200)
 
     host_vlan = {d["name"]: _host_vlan(topo, d) for d in topo.devices}
     vlan_order = sorted({v for v in host_vlan.values() if v})
@@ -150,17 +164,25 @@ def render(
         if i.get("mode")
     }
 
-    # 同一排主机超过 3 台时，地址标注隔一台下沉半格，避免横向互相压字
+    # 同一排主机较多时，地址标注隔一台下沉，避免横向互相压字。
+    # 下沉量按这一排的实际间距算：间距越小、标注越挤，就沉得越多。
     rows: dict[float, list[str]] = {}
     for d in topo.devices:
         if d["role"] in ("pc", "server") and d["name"] in pos:
             rows.setdefault(round(pos[d["name"]][1], 3), []).append(d["name"])
     stagger: dict[str, float] = {}
     for _, names in rows.items():
-        if len(names) >= 4:
-            for i, n in enumerate(sorted(names, key=lambda k: pos[k][0])):
-                if i % 2:
-                    stagger[n] = -0.62
+        if len(names) < 3:
+            continue
+        ordered = sorted(names, key=lambda k: pos[k][0])
+        gaps = [pos[ordered[i + 1]][0] - pos[ordered[i]][0] for i in range(len(ordered) - 1)]
+        gap = min(gaps) if gaps else 2.0
+        # 标注宽约 3.4 个单位（"192.168.10.11" + "gw 192.168.10.254" 两行），
+        # 间距不够时就下沉一格
+        drop = 0.62 if gap >= 4.2 else 0.95
+        for i, n in enumerate(ordered):
+            if i % 2:
+                stagger[n] = -drop
 
     if show_links:
         for ln in topo.links:
@@ -188,20 +210,32 @@ def render(
                         bbox=dict(boxstyle="round,pad=0.22", fc="white", ec="#D3D1C7", lw=0.5, alpha=1.0))
 
     # ---- VLAN 分组底色 ----
+    # 按**行**分组画框：设备多的时候同一层会拆成几行，
+    # 画一个大框会把不同行的设备全套进去，框线还压着别的 VLAN 的标签。
     if vlan_order:
-        groups: dict[int, list[str]] = {}
+        groups: dict[tuple[int, float], list[str]] = {}
         for name, vid in host_vlan.items():
             if vid and name in pos:
-                groups.setdefault(vid, []).append(name)
-        for vid, names in groups.items():
+                key = (vid, round(pos[name][1], 3))
+                groups.setdefault(key, []).append(name)
+        for (vid, _row), names in sorted(groups.items(), key=lambda kv: -kv[0][1]):
             color = _vlan_color(vid, vlan_order)
             pts = [pos[n] for n in names]
             xs = [p[0] for p in pts]
             ys = [p[1] for p in pts]
-            x0, x1 = min(xs) - 0.22, max(xs) + 0.22
-            # 有错行标注时要给第二排留出空间
-            drop = 1.70 if any(n in stagger for n in names) else 1.10
-            y0, y1 = min(ys) - drop, max(ys) + 0.75
+            x0, x1 = min(xs) - 0.30, max(xs) + 0.30
+            # 单台设备独占一个框时，框要够宽容下它的地址标注，
+            # 否则框线正好压在标注文字上
+            if len(names) == 1:
+                x0 -= 0.75
+                x1 += 0.75
+            # 框的下边界要低于该组里**最深**的标注（错行下沉的会低 0.95），
+            # 否则框线正好压在标注文字上
+            deepest = min((stagger.get(n, 0.0) for n in names), default=0.0)
+            drop = 1.10
+            if deepest < -0.5:
+                drop += (abs(deepest) - 0.62) * 0.9
+            y0, y1 = min(ys) - drop, max(ys) + 1.05
             ax.add_patch(
                 FancyBboxPatch(
                     (x0, y0), x1 - x0, y1 - y0,
@@ -210,8 +244,11 @@ def render(
                     lw=1.0, ls=(0, (4, 3)), zorder=0.6,
                 )
             )
-            ax.text((x0 + x1) / 2, y1 + 0.06, f"VLAN {vid}", ha="center", va="bottom",
-                    fontsize=8.6, fontweight="bold", color=color, zorder=5)
+            # VLAN 标签放在框的**上边界外侧**：放框内会压住设备名，
+            # 放顶部居中会被相邻 VLAN 的框线横穿，所以靠左放。
+            ax.text(x0 + 0.10, y1 + 0.05, f"VLAN {vid}", ha="left", va="bottom",
+                    fontsize=8.6, fontweight="bold", color=color, zorder=5,
+                    bbox=dict(boxstyle="round,pad=0.16", fc="white", ec="none", alpha=0.85))
 
     # 同一排主机超过 3 台时，地址标注隔一台下沉半格，避免横向互相压字
     for d in topo.devices:

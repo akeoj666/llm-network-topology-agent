@@ -24,3 +24,7 @@ spike/
 
 # ---- 拓扑位图由 gen.py 重算，仓库里只留 svg 与 pkt ----
 out/*_topology.png
+
+# ---- 测试残留（闸门/一致性测试的一次性产物）----
+out/gate*.pkt
+out/_*.pkt

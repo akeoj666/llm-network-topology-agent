@@ -116,8 +116,10 @@ class Device:
         m = _NAME_RE.search(self.block)
         if not m:
             raise ValueError(f"{self.name}: 找不到 NAME 节点")
+        old_name = _unesc(m.group(2))
         block = self.block[: m.start(2)] + _esc(new_name) + self.block[m.end(2) :]
         self.pkt.blocks[self.index] = block
+        self.pkt.sync_physical_name(old_name, new_name)
         return self
 
     def set_config(self, lines: list[str]) -> "Device":
@@ -322,6 +324,12 @@ class Pkt:
         """删除设备，并连带删除所有引用它的链路。"""
         target = self.by_name(name)
         ref = target.ref
+        # 物理视图（机架图）里也要删掉这个节点，否则删掉的设备还留在机架图上
+        uuid_str = ""
+        m = re.search(r"<PHYSICAL>([^<]*)</PHYSICAL>", target.block)
+        if m:
+            items = [x.strip() for x in m.group(1).split(",") if x.strip()]
+            uuid_str = items[-1] if items else ""
         keep = [b for i, b in enumerate(self.blocks) if i != target.index]
         xml = self.parts[0]
         for i, blk in enumerate(keep):
@@ -332,7 +340,24 @@ class Pkt:
             r"<LINK>.*?</LINK>", lambda m: "" if ref in m.group(0) else m.group(0), xml, flags=re.S
         )
         self.__init__(xml)
+        if uuid_str:
+            self._remove_physical_node(uuid_str)
         return self
+
+    def _remove_physical_node(self, uuid_str: str) -> None:
+        """从物理视图里删掉 UUID_STR 指定的节点。"""
+        xml = self.to_xml()
+        ws = re.search(r"<PHYSICALWORKSPACE>(.*)</PHYSICALWORKSPACE>", xml, re.S)
+        if not ws:
+            return
+        seg = ws.group(1)
+        for nm in re.finditer(r"<NODE>.*?</NODE>", seg, re.S):
+            if f"<UUID_STR>{uuid_str}</UUID_STR>" not in nm.group(0):
+                continue
+            seg = seg[: nm.start()] + seg[nm.end() :]
+            xml = xml[: ws.start(1)] + seg + xml[ws.end(1) :]
+            self.__init__(xml)
+            return
 
     # ---- 画布便签 ----
     def set_notes(self, items: list[tuple[str, float, float]]) -> "Pkt":
@@ -361,6 +386,53 @@ class Pkt:
             )
         xml = xml[: target.start(1)] + body + "\n  " + xml[target.end(1) :]
         self.__init__(xml)
+        return self
+
+    def sync_physical_name(self, old_name: str, new_name: str) -> "Pkt":
+        """设备改名后，同步物理视图（机架图）里对应节点的 NAME。
+
+        物理视图与设备块是**两处**独立的记录，PT 靠 ``PHYSICAL`` 链末位的
+        uuid 对账，所以名字不一致也**不影响加载**（PT 允许改名）。
+        但机架图上会显示旧名字，看着像「设备没改名成功」。
+
+        这里按 uuid 精确定位那个 NODE 再改名字 —— 不能按名字找，
+        因为同一台设备改名前后的名字本来就不同。
+        """
+        dev = None
+        for d in self.devices():
+            if d.name == new_name:
+                dev = d
+                break
+        if dev is None:
+            return self
+        m = re.search(r"<PHYSICAL>([^<]*)</PHYSICAL>", dev.block)
+        if not m:
+            return self
+        items = [x.strip() for x in m.group(1).split(",") if x.strip()]
+        if not items:
+            return self
+        uuid_str = items[-1]
+
+        xml = self.to_xml()
+        ws = re.search(r"<PHYSICALWORKSPACE>(.*)</PHYSICALWORKSPACE>", xml, re.S)
+        if not ws:
+            return self
+        seg = ws.group(1)
+        # 找 UUID_STR 等于该 uuid 的 NODE，改掉它的 NAME
+        for nm in re.finditer(r"<NODE>.*?</NODE>", seg, re.S):
+            blk = nm.group(0)
+            if f"<UUID_STR>{uuid_str}</UUID_STR>" not in blk:
+                continue
+            new_blk = re.sub(
+                r'(<NAME translate="true">)([^<]*)(</NAME>)',
+                lambda mm: mm.group(1) + _esc(new_name) + mm.group(3),
+                blk,
+                count=1,
+            )
+            seg = seg[: nm.start()] + new_blk + seg[nm.end() :]
+            xml = xml[: ws.start(1)] + seg + xml[ws.end(1) :]
+            self.__init__(xml)
+            return self
         return self
 
     # ---- 全局处理 ----

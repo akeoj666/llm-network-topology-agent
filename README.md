@@ -41,12 +41,15 @@ pktlab/          核心库
   repair.py      自动定位与修复闭环（DSL 层）
   diag.py        配置级排障：读 running-config → 定位 → 改那几行 → 复检
   plan.py        编址规划书：分层规划图 + IP/VLAN 表（给人看的那一份）
+  clone.py       设备块克隆：重分配全套身份标识（PT 载入索引靠它们）
+  layout.py      分层布局（按 layer 字段分层，宽层按 VLAN 边界拆行）
   nl.py          自然语言 → DSL（DeepSeek）
   pipeline.py    一条龙流水线
 examples/        用例（课内实验 + 实验 4-10 / 4-11 / 8-1 三层园区网）
 seeds/           三套骨架 pkt
-tools/           批处理脚本与七套自测
-docs/            评分对照、课内实验对齐、自动化验收、PT 验证清单
+tools/           批处理脚本与八套自测
+  verify_pkt.py  pkt 静态一致性校验器（PT 打不开问题的根治）
+docs/            评分对照、课内实验对齐、自动化验收、PT 验证清单、pkt 一致性校验
 out/             生成产物（pkt / 报告 / 配置 / 审计日志）
 ```
 

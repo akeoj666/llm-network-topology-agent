@@ -23,7 +23,7 @@
 #   信息中心    SRV0 本地 DNS 192.168.50.1/24  SRV1 web/ftp 192.168.50.2/24
 #   公网        SRV2 www.hnust.edu.cn 218.75.230.30/24
 meta:
-  id: UC-81
+  id: UC-83
   title: 实验 8-1 三层架构小型园区网
   source_prompt: 构建采用三层网络架构的小型园区网：Internet 服务器 → ISP 路由器 → 园区路由器（NAT+ACL）→ 核心层 → 汇聚层 → 接入层，四个部门各一个 VLAN，信息中心独立 VLAN，PC 用 DHCP 获取地址。
 

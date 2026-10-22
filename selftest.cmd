@@ -16,38 +16,43 @@ if not exist "%PY%" (
 
 set PYTHONIOENCODING=utf-8
 
-echo ---- 1/7 fault injection loop ----
+echo ---- 1/8 fault injection loop ----
 "%PY%" "%~dp0tools\test_faults.py"
 if errorlevel 1 goto failed
 
 echo.
-echo ---- 2/7 acceptance reverse test ----
+echo ---- 2/8 acceptance reverse test ----
 "%PY%" "%~dp0tools\test_accept.py"
 if errorlevel 1 goto failed
 
 echo.
-echo ---- 3/7 generation loop with guardrails ----
+echo ---- 3/8 generation loop with guardrails ----
 "%PY%" "%~dp0tools\test_nl.py"
 if errorlevel 1 goto failed
 
 echo.
-echo ---- 4/7 command-level guardrails ----
+echo ---- 4/8 command-level guardrails ----
 "%PY%" "%~dp0tools\test_cmdguard.py"
 if errorlevel 1 goto failed
 
 echo.
-echo ---- 5/7 RIP v1/v2 and OSPF wildcard config ----
+echo ---- 5/8 RIP v1/v2 and OSPF wildcard config ----
 "%PY%" "%~dp0tools\test_cfgprofile.py"
 if errorlevel 1 goto failed
 
 echo.
-echo ---- 6/7 config-level diagnosis and repair (C3) ----
+echo ---- 6/8 config-level diagnosis and repair (C3) ----
 "%PY%" "%~dp0tools\test_diag.py"
 if errorlevel 1 goto failed
 
 echo.
-echo ---- 7/7 IP/VLAN addressing plan ----
+echo ---- 7/8 IP/VLAN addressing plan ----
 "%PY%" "%~dp0tools\test_plan.py"
+if errorlevel 1 goto failed
+
+echo.
+echo ---- 8/8 pkt consistency check ----
+"%PY%" "%~dp0tools\test_pkt.py"
 if errorlevel 1 goto failed
 
 echo.
