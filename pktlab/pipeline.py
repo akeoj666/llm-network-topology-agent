@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import accept, assemble, cmdguard, config
+from . import plan as plan_mod
 from .diagram import render
 from .dsl import Topology
 
@@ -20,6 +21,7 @@ class Products:
     svg: Path
     configs: Path
     configs_by_dev: dict[str, list[str]] = field(default_factory=dict)
+    plan_path: Path | None = None   # IP/VLAN 编址规划书
 
 
 PASTE_GUIDE = """\
@@ -136,6 +138,16 @@ def write_configs(path: Path, topo: Topology, configs: dict[str, list[str]]) -> 
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_plan(path: Path, topo: Topology) -> None:
+    """写「IP/VLAN 编址规划书」：规划图 + 编址表 + VLAN 表 + 设备策略表。
+
+    这是给人看的那一份：`.pkt` 打开才知道长什么样，而报告、实验讲义、给同学
+    讲的时候需要的是一张图 + 几张表。
+    """
+    plan = plan_mod.build(topo)
+    path.write_text(plan_mod.render_markdown(plan), encoding="utf-8")
+
+
 def run(
     topo: Topology,
     out_dir: str | Path,
@@ -179,7 +191,10 @@ def run(
     render(topo, png, svg)
     cfg_path = out / f"{uid}_configs.md"
     write_configs(cfg_path, topo, result.configs)
-    return Products(out / f"{uid}.pkt", png, svg, cfg_path, result.configs)
+    plan_path = out / f"{uid}_编址规划.md"
+    write_plan(plan_path, topo)
+    return Products(out / f"{uid}.pkt", png, svg, cfg_path, result.configs,
+                    plan_path=plan_path)
 
 
 def finalize_audit(

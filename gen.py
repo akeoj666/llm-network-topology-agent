@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         return 5
 
     pipeline.finalize_audit(log, topo, p, args.out, summary={"通道": "YAML 直读", "结果": "通过"})
-    print(f"产物：{p.pkt}｜{p.png}｜{p.configs}")
+    print(f"产物：{p.pkt}｜{p.png}｜{p.configs}｜{p.plan_path}")
     print(f"审计：{p.pkt.parent / (topo.meta.get('id', 'topology') + '_audit.jsonl')}")
     return 0
 
