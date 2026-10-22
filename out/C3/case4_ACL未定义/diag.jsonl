@@ -1,0 +1,1 @@
+{"event": "diag", "case": "case4_ACL未定义", "rounds": 0, "issues_before": ["[需人工/ACL_UNKNOWN] R1 FastEthernet2/0.30 → access-group 100 — 接口挂了 ACL 100，但本设备没有 `access-list 100` 任何条目（效果等于全放行，与意图相反）"], "issues_after": ["[需人工/ACL_UNKNOWN] R1 FastEthernet2/0.30 → access-group 100 — 接口挂了 ACL 100，但本设备没有 `access-list 100` 任何条目（效果等于全放行，与意图相反）"], "fixes": [], "gate_passed": true}

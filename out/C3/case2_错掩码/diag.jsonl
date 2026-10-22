@@ -1,0 +1,1 @@
+{"event": "diag", "case": "case2_错掩码", "rounds": 1, "issues_before": ["[可修/MASK_MISMATCH] R1 R1 Serial0/0 ↔ R2 Serial1/0 — R1 的 10.0.0.1/255.255.255.0（10.0.0.0/24）与 R2 的 10.0.0.2/255.255.255.252（10.0.0.0/30）互不承认，应统一为 255.255.255.252（10.0.0.0/30）"], "issues_after": [], "fixes": ["R1 Serial0/0：掩码 255.255.255.0 → 255.255.255.252"], "gate_passed": true}

@@ -1,0 +1,1 @@
+{"event": "diag", "case": "case5_地址非法", "rounds": 0, "issues_before": ["[需人工/BAD_ADDR] R3 FastEthernet2/0.ip address — 192.168.16.128 是网段号 192.168.16.128/26，不能配在接口上"], "issues_after": ["[需人工/BAD_ADDR] R3 FastEthernet2/0.ip address — 192.168.16.128 是网段号 192.168.16.128/26，不能配在接口上"], "fixes": [], "gate_passed": true}

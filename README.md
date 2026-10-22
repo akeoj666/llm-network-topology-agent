@@ -8,7 +8,8 @@ start.cmd                          :: 一次性装环境 + 自检
 run uc01                           :: 用 examples/uc01.yaml 生成 pkt 与报告
 run-nl "三台路由器两个 PC，左边 192.168.16.0/25 ..."   :: 走自然语言通道
 run-accept UC-01                   :: 只跑验收报告
-selftest.cmd                       :: 五套自测
+selftest.cmd                       :: 六套自测
+python tools\diag_cfg.py bad_configs\case1_漏network   :: 给一份坏配置，定位并修
 ```
 
 产物落在 `out/`：`{UID}.pkt`、`{UID}_topology.svg`、`{UID}_configs.md`
@@ -35,13 +36,14 @@ pktlab/          核心库
   config.py      生成 IOS 配置（IP/VLAN/RIP/OSPF/ACL/静态）
   cmdguard.py    命令级白名单、黑名单、确认门
   accept.py      静态验收（ping 矩阵 / traceroute / 路由表 / 等价多路径）
-  faults.py      24 类故障注入
-  repair.py      自动定位与修复闭环
+  faults.py      24 类故障注入（DSL 层）
+  repair.py      自动定位与修复闭环（DSL 层）
+  diag.py        配置级排障：读 running-config → 定位 → 改那几行 → 复检
   nl.py          自然语言 → DSL（DeepSeek）
   pipeline.py    一条龙流水线
 examples/        用例（课内实验 + 实验 4-10 / 4-11）
 seeds/           三套骨架 pkt
-tools/           批处理脚本与五套自测
+tools/           批处理脚本与六套自测
 docs/            评分对照、课内实验对齐、自动化验收、PT 验证清单
 out/             生成产物（pkt / 报告 / 配置 / 审计日志）
 ```
