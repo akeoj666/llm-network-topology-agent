@@ -1,0 +1,7 @@
+# 生成与验收的核心依赖（只用 YAML 通道时，前两项就够）
+PyYAML==6.0.3
+matplotlib==3.11.2
+
+# 自然语言通道（nl.py）用标准库 urllib 调 DeepSeek，不需要 requests
+# 抽取课件文字（tools/extract_pptx_text.py）才需要下面这个
+python-pptx==1.0.2
