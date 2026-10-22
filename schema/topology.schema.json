@@ -1,0 +1,486 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lab.local/schema/topology.schema.json",
+  "title": "网络拓扑 DSL",
+  "type": "object",
+  "required": [
+    "meta",
+    "devices",
+    "links"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": [
+        "id",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^UC-[0-9]{2}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 40
+        },
+        "source_prompt": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/device"
+      }
+    },
+    "links": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/link"
+      }
+    },
+    "pool": {
+      "type": "string",
+      "description": "可用地址池，所有子网必须落在其中"
+    },
+    "subnets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/subnet"
+      }
+    },
+    "vlans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/vlan"
+      }
+    },
+    "routing": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/routing"
+      }
+    },
+    "acls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/acl"
+      }
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "验收断言：这些主机对应该通/不通。验收器据此给出通过/失败。",
+      "properties": {
+        "reach": {
+          "type": "array",
+          "description": "预期能 ping 通的 [源, 目的]",
+          "items": {
+            "$ref": "#/$defs/pair"
+          }
+        },
+        "block": {
+          "type": "array",
+          "description": "预期不通的 [源, 目的]",
+          "items": {
+            "$ref": "#/$defs/pair"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "device": {
+      "type": "object",
+      "required": [
+        "name",
+        "role"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,15}$"
+        },
+        "role": {
+          "enum": [
+            "router",
+            "switch",
+            "pc",
+            "server"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "ip": {
+          "type": "string"
+        },
+        "mask": {
+          "type": "string"
+        },
+        "gateway": {
+          "type": "string"
+        },
+        "pos": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "ip": {
+                "type": "string"
+              },
+              "vlan": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4094
+              },
+              "mode": {
+                "enum": [
+                  "access",
+                  "trunk"
+                ]
+              },
+              "dot1q": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4094,
+                "description": "子接口封装 VLAN（路由器单臂路由：FastEthernet2/0.10 + dot1q: 10）"
+              },
+              "area": {
+                "type": "integer",
+                "description": "该接口所属 OSPF 区域，缺省取 routing.area"
+              },
+              "shutdown": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,15}:[A-Za-z][A-Za-z0-9/._-]*$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,15}:[A-Za-z][A-Za-z0-9/._-]*$"
+        },
+        "cable": {
+          "enum": [
+            "copper",
+            "cross",
+            "serial"
+          ]
+        },
+        "subnet": {
+          "type": "string"
+        }
+      }
+    },
+    "subnet": {
+      "type": "object",
+      "required": [
+        "cidr"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cidr": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "gateway": {
+          "type": "string"
+        },
+        "vlan": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094
+        },
+        "hosts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "area": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "OSPF 区域号。用于报告里的区域划分说明；接口上的 area 才是生成配置的依据。"
+        }
+      }
+    },
+    "vlan": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094
+        },
+        "name": {
+          "type": "string"
+        },
+        "cidr": {
+          "type": "string"
+        },
+        "gateway": {
+          "type": "string",
+          "description": "SVI 模式下交换机 interface vlan 的地址"
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": [
+        "device",
+        "protocol"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "protocol": {
+          "enum": [
+            "static",
+            "rip",
+            "ospf",
+            "bgp",
+            "none"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "process": {
+          "type": "integer"
+        },
+        "area": {
+          "type": "integer"
+        },
+        "auto_summary": {
+          "type": "boolean"
+        },
+        "as": {
+          "type": "integer"
+        },
+        "networks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stub_areas": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "配置成末梢区域的 area 列表（ABR 与区内路由器都要配）"
+        },
+        "default_route": {
+          "type": "string"
+        },
+        "admin_distance": {
+          "type": "integer"
+        },
+        "routes": {
+          "type": "array",
+          "description": "静态路由明细（protocol=static 时生效）",
+          "items": {
+            "type": "object",
+            "required": [
+              "network",
+              "mask",
+              "next_hop"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "network": {
+                "type": "string"
+              },
+              "mask": {
+                "type": "string"
+              },
+              "next_hop": {
+                "type": "string"
+              },
+              "admin_distance": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 255,
+                "description": "管理距离。浮动静态路由用它做备份（主用默认 1，备用设 10）"
+              }
+            }
+          }
+        },
+        "neighbors": {
+          "type": "array",
+          "description": "BGP 邻居（protocol=bgp 时生效）",
+          "items": {
+            "type": "object",
+            "required": [
+              "ip",
+              "remote_as"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "ip": {
+                "type": "string"
+              },
+              "remote_as": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      }
+    },
+    "acl": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "rules"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "编号 ACL：标准 1-99，扩展 100-199"
+        },
+        "type": {
+          "enum": [
+            "standard",
+            "extended"
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/aclRule"
+          }
+        },
+        "apply": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/aclApply"
+          }
+        }
+      }
+    },
+    "aclRule": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "permit",
+            "deny"
+          ]
+        },
+        "protocol": {
+          "enum": [
+            "ip",
+            "tcp",
+            "udp",
+            "icmp"
+          ],
+          "description": "扩展 ACL 才用；标准 ACL 只能按源地址过滤"
+        },
+        "source": {
+          "type": "string",
+          "description": "any 或 CIDR（192.168.1.0/24）或单个主机（/32 会写成 host）"
+        },
+        "destination": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "仅 tcp/udp 有效，生成 eq <port>"
+        }
+      }
+    },
+    "aclApply": {
+      "type": "object",
+      "required": [
+        "device",
+        "interface",
+        "direction"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "interface": {
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "in",
+            "out"
+          ]
+        }
+      }
+    },
+    "pair": {
+      "type": "array",
+      "description": "两个设备名",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
