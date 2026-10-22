@@ -1,0 +1,79 @@
+# UC-05 部门隔离与互通（按评分标准附录 UC-05 逐字对齐）
+# 一台 24 口交换机接 6 台 PC，划两个 VLAN，各 3 台：
+#   VLAN 10 财务部 192.168.1.0/24（PC0-PC2），网关 .254
+#   VLAN 20 市场部 192.168.2.0/24（PC3-PC5），网关 .254
+# 方案一（本文件生成 pkt）：路由器单臂，Fa2/0.10 / Fa2/0.20 两个 dot1Q 子接口做三层网关。
+# 方案二（三层交换机 SVI，不用路由器）：骨架里没有 3560 设备槽位，无法生成 pkt，
+#   配置全文见 docs/UC-05_方案二_三层交换机SVI.md，可在 PT 里手工加一台 3560 粘贴。
+meta:
+  id: UC-05
+  title: 部门隔离与互通（单臂路由）
+  source_prompt: 财务部和市场部要在二层隔离、三层互通，一台交换机接 6 台 PC，VLAN10 用 192.168.1.0/24、VLAN20 用 192.168.2.0/24，各 3 台，网关都是 .254，用单臂路由实现跨 VLAN 互通，同 VLAN 内也要通。
+
+subnets:
+  - { cidr: 192.168.1.0/24, name: finance, gateway: 192.168.1.254, hosts: 3, vlan: 10 }
+  - { cidr: 192.168.2.0/24, name: market, gateway: 192.168.2.254, hosts: 3, vlan: 20 }
+
+vlans:
+  - { id: 10, name: FIN, cidr: 192.168.1.0/24 }
+  - { id: 20, name: MKT, cidr: 192.168.2.0/24 }
+
+devices:
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      # 物理口只承载 trunk，不打地址
+      - { name: FastEthernet2/0 }
+      - { name: FastEthernet2/0.10, ip: 192.168.1.254/24, dot1q: 10 }
+      - { name: FastEthernet2/0.20, ip: 192.168.2.254/24, dot1q: 20 }
+      - { name: Serial0/0, shutdown: true }
+      - { name: Serial1/0, shutdown: true }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1, mode: access, vlan: 10 }
+      - { name: FastEthernet0/2, mode: access, vlan: 10 }
+      - { name: FastEthernet0/3, mode: access, vlan: 10 }
+      - { name: FastEthernet0/4, mode: access, vlan: 20 }
+      - { name: FastEthernet0/5, mode: access, vlan: 20 }
+      - { name: FastEthernet0/6, mode: access, vlan: 20 }
+      - { name: FastEthernet0/24, mode: trunk }
+
+  - { name: PC0, role: pc, model: PC-PT, ip: 192.168.1.11/24, gateway: 192.168.1.254 }
+  - { name: PC1, role: pc, model: PC-PT, ip: 192.168.1.12/24, gateway: 192.168.1.254 }
+  - { name: PC2, role: pc, model: PC-PT, ip: 192.168.1.13/24, gateway: 192.168.1.254 }
+  - { name: PC3, role: pc, model: PC-PT, ip: 192.168.2.11/24, gateway: 192.168.2.254 }
+  - { name: PC4, role: pc, model: PC-PT, ip: 192.168.2.12/24, gateway: 192.168.2.254 }
+  - { name: PC5, role: pc, model: PC-PT, ip: 192.168.2.13/24, gateway: 192.168.2.254 }
+
+links:
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW0:FastEthernet0/2", cable: copper }
+  - { from: "PC2:FastEthernet0", to: "SW0:FastEthernet0/3", cable: copper }
+  - { from: "PC3:FastEthernet0", to: "SW0:FastEthernet0/4", cable: copper }
+  - { from: "PC4:FastEthernet0", to: "SW0:FastEthernet0/5", cable: copper }
+  - { from: "PC5:FastEthernet0", to: "SW0:FastEthernet0/6", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R1:FastEthernet2/0", cable: copper }
+
+routing:
+  - { device: R1, protocol: none }
+
+# 6 台 PC 两两互通：同 VLAN 3 对 + 跨 VLAN 9×2 = 21 条可达断言
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC2]
+    - [PC0, PC2]
+    - [PC3, PC4]
+    - [PC4, PC5]
+    - [PC3, PC5]
+    - [PC0, PC3]
+    - [PC3, PC0]
+    - [PC1, PC4]
+    - [PC4, PC1]
+    - [PC2, PC5]
+    - [PC5, PC2]

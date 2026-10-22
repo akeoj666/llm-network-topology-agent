@@ -1,0 +1,89 @@
+# UC-01 创业公司组网
+# 三台路由器、两台 PC；192.168.16.0/24 前半给行政部（PC0，网关取子网最后一个可用地址）；
+# 192.168.16.128/26 给研发部（PC1）；路由器之间三条 /30 串行链路；
+# 全网 RIP v2 并关闭自动汇总。
+meta:
+  id: UC-01
+  title: 创业公司组网
+  source_prompt: 三台路由器、两台 PC，左边 192.168.16.0/24 前一半给行政部，右边 192.168.16.128/26 给研发部，路由器之间用三条 /30 串联，跑 RIP 要支持 VLSM 并关闭自动汇总。
+
+subnets:
+  - { cidr: 192.168.16.0/26, name: admin, gateway: 192.168.16.62, hosts: 1 }
+  - { cidr: 192.168.16.128/26, name: rd, gateway: 192.168.16.190, hosts: 1 }
+  - { cidr: 10.0.0.28/30, name: r1-r2 }
+  - { cidr: 10.0.0.32/30, name: r2-r3 }
+  - { cidr: 10.0.0.36/30, name: r1-r3 }
+
+devices:
+  - name: R1
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.62/26 }
+      - { name: Serial0/0, ip: 10.0.0.29/30 }
+      - { name: Serial1/0, ip: 10.0.0.37/30 }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: R2
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: Serial1/0, ip: 10.0.0.30/30 }
+      - { name: Serial0/0, ip: 10.0.0.33/30 }
+      - { name: FastEthernet2/0, shutdown: true }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: R3
+    role: router
+    model: Router-PT-Empty
+    interfaces:
+      - { name: FastEthernet2/0, ip: 192.168.16.190/26 }
+      - { name: Serial1/0, ip: 10.0.0.34/30 }
+      - { name: Serial0/0, ip: 10.0.0.38/30 }
+      - { name: FastEthernet3/0, shutdown: true }
+
+  - name: SW0
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: SW1
+    role: switch
+    model: 2960-24TT
+    interfaces:
+      - { name: FastEthernet0/1 }
+      - { name: FastEthernet0/24 }
+
+  - name: PC0
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.10/26
+    gateway: 192.168.16.62
+
+  - name: PC1
+    role: pc
+    model: PC-PT
+    ip: 192.168.16.138/26
+    gateway: 192.168.16.190
+
+links:
+  - { from: "R1:Serial0/0", to: "R2:Serial1/0", cable: serial, subnet: 10.0.0.28/30 }
+  - { from: "R2:Serial0/0", to: "R3:Serial1/0", cable: serial, subnet: 10.0.0.32/30 }
+  - { from: "R1:Serial1/0", to: "R3:Serial0/0", cable: serial, subnet: 10.0.0.36/30 }
+  - { from: "PC0:FastEthernet0", to: "SW0:FastEthernet0/1", cable: copper }
+  - { from: "SW0:FastEthernet0/24", to: "R1:FastEthernet2/0", cable: copper }
+  - { from: "PC1:FastEthernet0", to: "SW1:FastEthernet0/1", cable: copper }
+  - { from: "SW1:FastEthernet0/24", to: "R3:FastEthernet2/0", cable: copper }
+
+routing:
+  - { device: R1, protocol: rip, version: 2, auto_summary: false }
+  - { device: R2, protocol: rip, version: 2, auto_summary: false }
+  - { device: R3, protocol: rip, version: 2, auto_summary: false }
+
+# 验收断言：这些主机对应该通 / 不通（tools/accept.py 据此判定通过）
+expect:
+  reach:
+    - [PC0, PC1]
+    - [PC1, PC0]
